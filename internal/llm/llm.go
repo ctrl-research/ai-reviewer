@@ -29,6 +29,9 @@ type Request struct {
 	System    string
 	Prompt    string
 	MaxTokens int
+	// Extra is merged into the top level of the JSON request body for
+	// provider-specific parameters. A JSON null value removes that key.
+	Extra map[string]json.RawMessage
 }
 
 // Result is the generated review text.
@@ -105,7 +108,7 @@ func (c *Client) Review(ctx context.Context, req Request) (*Result, error) {
 			headers["Authorization"] = "Bearer " + c.APIKey
 		}
 	}
-	body, err := json.Marshal(payload)
+	body, err := withExtra(payload, req.Extra)
 	if err != nil {
 		return nil, err
 	}
@@ -128,6 +131,26 @@ func (c *Client) Review(ctx context.Context, req Request) (*Result, error) {
 		return parseAnthropic(resp)
 	}
 	return parseOpenAI(resp)
+}
+
+// withExtra marshals payload and merges extra into its top-level object.
+func withExtra(payload any, extra map[string]json.RawMessage) ([]byte, error) {
+	body, err := json.Marshal(payload)
+	if err != nil || len(extra) == 0 {
+		return body, err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(body, &fields); err != nil {
+		return nil, err
+	}
+	for k, v := range extra {
+		if string(v) == "null" {
+			delete(fields, k)
+		} else {
+			fields[k] = v
+		}
+	}
+	return json.Marshal(fields)
 }
 
 type message struct {

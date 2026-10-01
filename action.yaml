@@ -46,6 +46,10 @@ inputs:
     description: "Override the default system prompt used for the review."
     required: false
     default: ""
+  extra-body:
+    description: "JSON object merged into the LLM request body, for provider-specific parameters. A null value removes a key. E.g. '{\"reasoning_split\": true}' for MiniMax, or '{\"max_tokens\": null, \"max_completion_tokens\": 16000}' for newer OpenAI models."
+    required: false
+    default: ""
   post-comment:
     description: "Post the review as a sticky PR comment ('true'/'false'). The comment is updated in place on subsequent runs."
     required: false
@@ -147,5 +151,6 @@ runs:
         EGO_MAX_TOKENS: ${{ inputs.max-tokens }}
         EGO_MAX_DIFF_BYTES: ${{ inputs.max-diff-bytes }}
         EGO_REVIEW_PROMPT: ${{ inputs.review-prompt }}
+        EGO_EXTRA_BODY: ${{ inputs.extra-body }}
         EGO_POST_COMMENT: ${{ inputs.post-comment }}
       run: '"$EGO_BIN"'

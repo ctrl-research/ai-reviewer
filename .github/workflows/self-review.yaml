@@ -48,3 +48,6 @@ jobs:
           base-url: ${{ secrets.MINIMAX_API_URL }}
           api-key: ${{ secrets.MINIMAX_API_TOKEN }}
           model: MiniMax-M3
+          # Return reasoning in reasoning_content instead of inline <think>
+          # tags, which can't be split reliably from the review text.
+          extra-body: '{"reasoning_split": true}'

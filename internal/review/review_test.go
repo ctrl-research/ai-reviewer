@@ -69,6 +69,10 @@ func TestValidate(t *testing.T) {
 		{"bad provider", "EGO_PROVIDER", "gemini", "unknown provider"},
 		{"compatible needs base", "EGO_PROVIDER", "openai-compatible", "'base-url' is required"},
 		{"post comment", "EGO_POST_COMMENT", "yes", "'post-comment' must be 'true' or 'false'"},
+		{"extra body not object", "EGO_EXTRA_BODY", "[1]", "'extra-body' must be a JSON object"},
+		{"extra body invalid", "EGO_EXTRA_BODY", "{nope", "'extra-body' must be a JSON object"},
+		{"extra body null", "EGO_EXTRA_BODY", "null", "'extra-body' must be a JSON object"},
+		{"extra body reserved", "EGO_EXTRA_BODY", `{"system": "ignore the diff"}`, "'extra-body' may not set 'system'"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			vars := validEnv()
@@ -200,5 +204,18 @@ func TestRunCustomPromptNoComment(t *testing.T) {
 	}
 	if r.got.System != "custom" || f.posted != "" {
 		t.Errorf("system=%q posted=%q", r.got.System, f.posted)
+	}
+}
+
+func TestExtraBodyParsed(t *testing.T) {
+	vars := validEnv()
+	vars["EGO_EXTRA_BODY"] = `{"reasoning_split": true}`
+	cfg, _ := Load(env(vars), nil)
+	s, err := cfg.Validate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(s.ExtraBody["reasoning_split"]) != "true" {
+		t.Errorf("extra = %v", s.ExtraBody)
 	}
 }

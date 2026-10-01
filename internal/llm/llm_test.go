@@ -191,3 +191,25 @@ func TestOpenAIStripsInlineThinking(t *testing.T) {
 		})
 	}
 }
+
+func TestExtraBodyMergesAndRemoves(t *testing.T) {
+	got, url := serve(t, 200, `{"choices":[{"message":{"content":"ok"}}]}`)
+	r := req
+	r.Extra = map[string]json.RawMessage{
+		"reasoning_split":       json.RawMessage(`true`),
+		"max_tokens":            json.RawMessage(`null`),
+		"max_completion_tokens": json.RawMessage(`500`),
+	}
+	if _, err := newTestClient(t, OpenAICompatible, url, "").Review(context.Background(), r); err != nil {
+		t.Fatal(err)
+	}
+	if got.body["reasoning_split"] != true || got.body["max_completion_tokens"] != float64(500) {
+		t.Errorf("extra fields missing: %v", got.body)
+	}
+	if _, ok := got.body["max_tokens"]; ok {
+		t.Errorf("max_tokens not removed: %v", got.body)
+	}
+	if got.body["model"] != "m" {
+		t.Errorf("model = %v", got.body["model"])
+	}
+}
