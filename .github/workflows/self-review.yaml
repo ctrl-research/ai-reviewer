@@ -38,7 +38,16 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
 
+      # MiniMax through its OpenAI-compatible API, using org secrets. To switch
+      # back to Anthropic, drop provider/base-url/model and pass
+      # api-key: ${{ secrets.ANTHROPIC_API_KEY }}.
       - name: Review with the merged action
         uses: ./
         with:
-          api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          provider: openai-compatible
+          base-url: ${{ secrets.MINIMAX_API_URL }}
+          api-key: ${{ secrets.MINIMAX_API_TOKEN }}
+          model: MiniMax-M3
+          # Return reasoning in reasoning_content instead of inline <think>
+          # tags, which can't be split reliably from the review text.
+          extra-body: '{"reasoning_split": true}'

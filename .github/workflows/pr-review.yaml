@@ -44,6 +44,11 @@ on:
         required: false
         default: ""
         description: "Override the default review system prompt."
+      extra-body:
+        type: string
+        required: false
+        default: ""
+        description: "JSON object merged into the LLM request body (null removes a key), e.g. '{\"reasoning_split\": true}' for MiniMax."
       post-comment:
         type: boolean
         required: false
@@ -80,4 +85,5 @@ jobs:
           max-tokens: ${{ inputs.max-tokens }}
           max-diff-bytes: ${{ inputs.max-diff-bytes }}
           review-prompt: ${{ inputs.review-prompt }}
+          extra-body: ${{ inputs.extra-body }}
           post-comment: ${{ inputs.post-comment }}

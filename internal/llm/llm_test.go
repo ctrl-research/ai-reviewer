@@ -159,3 +159,57 @@ func TestNewValidatesProvider(t *testing.T) {
 		t.Errorf("default OpenAI URL = %q err=%v", c.URL, err)
 	}
 }
+
+func TestOpenAIStripsInlineThinking(t *testing.T) {
+	for _, tc := range []struct {
+		name, content, finish, want, wantErr string
+	}{
+		{"think block", `<think>\nlet me look\n</think>\n\n## Summary\nok`, "stop", "## Summary\nok", ""},
+		{"no think block", "## Summary\nmentions <think> later", "stop", "## Summary\nmentions <think> later", ""},
+		{"only thinking", "<think>hmm</think>", "stop", "", "no review text"},
+		{"cut off mid-thought", "<think>still going", "length", "", "before finishing its reasoning"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resp, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{
+				"message":       map[string]any{"content": strings.ReplaceAll(tc.content, `\n`, "\n")},
+				"finish_reason": tc.finish,
+			}}})
+			_, url := serve(t, 200, string(resp))
+			res, err := newTestClient(t, OpenAICompatible, url, "").Review(context.Background(), req)
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("err = %v, want %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if res.Text != tc.want {
+				t.Errorf("text = %q, want %q", res.Text, tc.want)
+			}
+		})
+	}
+}
+
+func TestExtraBodyMergesAndRemoves(t *testing.T) {
+	got, url := serve(t, 200, `{"choices":[{"message":{"content":"ok"}}]}`)
+	r := req
+	r.Extra = map[string]json.RawMessage{
+		"reasoning_split":       json.RawMessage(`true`),
+		"max_tokens":            json.RawMessage(`null`),
+		"max_completion_tokens": json.RawMessage(`500`),
+	}
+	if _, err := newTestClient(t, OpenAICompatible, url, "").Review(context.Background(), r); err != nil {
+		t.Fatal(err)
+	}
+	if got.body["reasoning_split"] != true || got.body["max_completion_tokens"] != float64(500) {
+		t.Errorf("extra fields missing: %v", got.body)
+	}
+	if _, ok := got.body["max_tokens"]; ok {
+		t.Errorf("max_tokens not removed: %v", got.body)
+	}
+	if got.body["model"] != "m" {
+		t.Errorf("model = %v", got.body["model"])
+	}
+}

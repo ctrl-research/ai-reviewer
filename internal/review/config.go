@@ -1,6 +1,7 @@
 package review
 
 import (
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -28,6 +29,7 @@ type Config struct {
 	MaxTokens    string
 	MaxDiffBytes string
 	ReviewPrompt string
+	ExtraBody    string
 	PostComment  string
 }
 
@@ -59,6 +61,7 @@ func Load(getenv func(string) string, args []string) (*Config, error) {
 	fs.StringVar(&c.Model, "model", env("MODEL", "claude-opus-4-8"), "model ID")
 	fs.StringVar(&c.MaxTokens, "max-tokens", env("MAX_TOKENS", "16000"), "maximum output tokens")
 	fs.StringVar(&c.MaxDiffBytes, "max-diff-bytes", env("MAX_DIFF_BYTES", "300000"), "truncate the diff beyond this many bytes")
+	fs.StringVar(&c.ExtraBody, "extra-body", env("EXTRA_BODY", ""), "JSON object merged into the LLM request body (null removes a key)")
 	fs.StringVar(&c.PostComment, "post-comment", env("POST_COMMENT", "true"), "post the review as a sticky PR comment")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: ego [flags]\n\nSecrets are read from the environment only:\n"+
@@ -89,6 +92,7 @@ type Settings struct {
 	MaxTokens    int
 	MaxDiffBytes int64
 	ReviewPrompt string
+	ExtraBody    map[string]json.RawMessage
 	PostComment  bool
 }
 
@@ -155,10 +159,33 @@ func (c *Config) Validate() (*Settings, error) {
 		return nil, fmt.Errorf("unknown provider '%s'. Use 'anthropic', 'openai', or 'openai-compatible'", c.Provider)
 	}
 
+	if s.ExtraBody, err = parseExtraBody(c.ExtraBody); err != nil {
+		return nil, err
+	}
+
 	if s.PostComment, err = strconv.ParseBool(c.PostComment); err != nil {
 		return nil, fmt.Errorf("'post-comment' must be 'true' or 'false' (got '%s')", c.PostComment)
 	}
 	return s, nil
+}
+
+// reservedBodyKeys carry the prompt and model; extra-body may not replace them.
+var reservedBodyKeys = []string{"model", "messages", "system"}
+
+func parseExtraBody(v string) (map[string]json.RawMessage, error) {
+	if strings.TrimSpace(v) == "" {
+		return nil, nil
+	}
+	var extra map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(v), &extra); err != nil || extra == nil {
+		return nil, errors.New("'extra-body' must be a JSON object, e.g. '{\"reasoning_split\": true}'")
+	}
+	for _, k := range reservedBodyKeys {
+		if _, ok := extra[k]; ok {
+			return nil, fmt.Errorf("'extra-body' may not set '%s'; use the matching input instead", k)
+		}
+	}
+	return extra, nil
 }
 
 func positiveInt(name, v string) (int, error) {

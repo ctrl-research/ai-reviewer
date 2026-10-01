@@ -29,6 +29,9 @@ type Request struct {
 	System    string
 	Prompt    string
 	MaxTokens int
+	// Extra is merged into the top level of the JSON request body for
+	// provider-specific parameters. A JSON null value removes that key.
+	Extra map[string]json.RawMessage
 }
 
 // Result is the generated review text.
@@ -105,7 +108,7 @@ func (c *Client) Review(ctx context.Context, req Request) (*Result, error) {
 			headers["Authorization"] = "Bearer " + c.APIKey
 		}
 	}
-	body, err := json.Marshal(payload)
+	body, err := withExtra(payload, req.Extra)
 	if err != nil {
 		return nil, err
 	}
@@ -128,6 +131,26 @@ func (c *Client) Review(ctx context.Context, req Request) (*Result, error) {
 		return parseAnthropic(resp)
 	}
 	return parseOpenAI(resp)
+}
+
+// withExtra marshals payload and merges extra into its top-level object.
+func withExtra(payload any, extra map[string]json.RawMessage) ([]byte, error) {
+	body, err := json.Marshal(payload)
+	if err != nil || len(extra) == 0 {
+		return body, err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(body, &fields); err != nil {
+		return nil, err
+	}
+	for k, v := range extra {
+		if string(v) == "null" {
+			delete(fields, k)
+		} else {
+			fields[k] = v
+		}
+	}
+	return json.Marshal(fields)
 }
 
 type message struct {
@@ -212,10 +235,34 @@ func parseOpenAI(body []byte) (*Result, error) {
 	if ref := choice.Message.Refusal; ref != nil && *ref != "" {
 		return nil, fmt.Errorf("model declined to review: %s", *ref)
 	}
-	if choice.Message.Content == nil || strings.TrimSpace(*choice.Message.Content) == "" {
+	truncated := choice.FinishReason == "length"
+	if choice.Message.Content == nil {
 		return nil, ErrEmpty
 	}
-	return &Result{Text: *choice.Message.Content, Truncated: choice.FinishReason == "length"}, nil
+	text, finished := stripThinking(*choice.Message.Content)
+	if !finished && truncated {
+		return nil, errors.New("model stopped at max-tokens before finishing its reasoning; raise max-tokens")
+	}
+	if strings.TrimSpace(text) == "" {
+		return nil, ErrEmpty
+	}
+	return &Result{Text: text, Truncated: truncated}, nil
+}
+
+// stripThinking removes a leading <think>…</think> block from s. Some
+// OpenAI-compatible servers (MiniMax M2, DeepSeek-R1 and Qwen via Ollama)
+// return the model's reasoning inline in content this way. finished is false
+// when the block was opened but never closed.
+func stripThinking(s string) (text string, finished bool) {
+	t := strings.TrimLeft(s, " \t\r\n")
+	if !strings.HasPrefix(t, "<think>") {
+		return s, true
+	}
+	end := strings.Index(t, "</think>")
+	if end < 0 {
+		return "", false
+	}
+	return strings.TrimLeft(t[end+len("</think>"):], " \t\r\n"), true
 }
 
 func or(v, fallback string) string {

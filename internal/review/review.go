@@ -72,6 +72,7 @@ func Run(ctx context.Context, s *Settings, f Forge, r Reviewer, log *gha.Logger)
 		System:    system,
 		Prompt:    UserPrompt(pr, diff, truncated, s.MaxDiffBytes),
 		MaxTokens: s.MaxTokens,
+		Extra:     s.ExtraBody,
 	})
 	if err != nil {
 		return "", err
