@@ -1,4 +1,8 @@
-# ai-reviewer
+# ego
+
+**The reality check between your agents and `main`.**
+
+In Freud's model of the mind, the *id* acts on impulse, the *superego* holds the rules, and the *ego* weighs the two against reality before anything happens. Agentic development has the same shape: coding agents generate changes on impulse, your conventions sit above them, and `ego` is the step that checks the result before it merges. (It's also named for a certain food critic.)
 
 LLM-powered pull request review. Fetches the PR diff, sends it to a configurable LLM provider, and posts the review as a sticky PR comment (updated in place on subsequent pushes).
 
@@ -35,7 +39,7 @@ permissions:
 
 jobs:
   review:
-    uses: ctrl-research/ai-reviewer/.github/workflows/pr-review.yaml@main
+    uses: ctrl-research/ego/.github/workflows/pr-review.yaml@main
     with:
       provider: anthropic
       model: claude-opus-4-8
@@ -50,7 +54,7 @@ Point at any OpenAI-compatible endpoint. Use a self-hosted runner label if the e
 ```yaml
 jobs:
   review:
-    uses: ctrl-research/ai-reviewer/.github/workflows/pr-review.yaml@main
+    uses: ctrl-research/ego/.github/workflows/pr-review.yaml@main
     with:
       provider: openai-compatible
       base-url: http://ollama.internal:11434/v1
@@ -63,7 +67,7 @@ jobs:
 ```yaml
 jobs:
   review:
-    uses: ctrl-research/ai-reviewer/.github/workflows/pr-review.yaml@main
+    uses: ctrl-research/ego/.github/workflows/pr-review.yaml@main
     with:
       provider: openai
       model: gpt-4o
@@ -85,7 +89,7 @@ jobs:
     runs-on: docker
     steps:
       - name: PR Review
-        uses: https://github.com/ctrl-research/ai-reviewer@main
+        uses: https://github.com/ctrl-research/ego@main
         with:
           platform: forgejo
           provider: anthropic
@@ -109,7 +113,7 @@ jobs:
     steps:
       - name: PR Review
         id: review
-        uses: ctrl-research/ai-reviewer@main
+        uses: ctrl-research/ego@main
         with:
           provider: anthropic
           model: claude-opus-4-8
@@ -122,18 +126,18 @@ jobs:
 
 ## Versioning
 
-Releases are tagged with bare SemVer (`X.Y.Z`, no `v` prefix). Pin to a release tag (e.g. `ctrl-research/ai-reviewer@1.0.0`) instead of `@main` for reproducible reviews. Note that the reusable workflow always calls the composite action at `@main` (built from source on every run); use the composite action directly if you need the whole pipeline pinned or want the prebuilt binary.
+Releases are tagged with bare SemVer (`X.Y.Z`, no `v` prefix). Pin to a release tag (e.g. `ctrl-research/ego@1.0.0`) instead of `@main` for reproducible reviews. Note that the reusable workflow always calls the composite action at `@main` (built from source on every run); use the composite action directly if you need the whole pipeline pinned or want the prebuilt binary.
 
 Merging a PR to `main` cuts a release from its `major`/`minor`/`patch` label (default `patch`); the **Release** workflow can also be dispatched manually with an explicit version.
 
 ## Running locally
 
-The same binary works as a CLI. Non-secret settings are flags (see `ai-reviewer --help`); secrets come from the environment:
+The same binary works as a CLI. Non-secret settings are flags (see `ego --help`); secrets come from the environment:
 
 ```bash
-go build -o ai-reviewer ./cmd/ai-reviewer
-AI_REVIEWER_TOKEN="$(gh auth token)" AI_REVIEWER_API_KEY="$ANTHROPIC_API_KEY" \
-  ./ai-reviewer --repo ctrl-research/ai-reviewer --pr 42 --post-comment=false
+go build -o ego ./cmd/ego
+EGO_TOKEN="$(gh auth token)" EGO_API_KEY="$ANTHROPIC_API_KEY" \
+  ./ego --repo ctrl-research/ego --pr 42 --post-comment=false
 ```
 
 With `--post-comment=false` and no `GITHUB_OUTPUT` set, the review is printed to stdout.
@@ -163,7 +167,7 @@ With `--post-comment=false` and no `GITHUB_OUTPUT` set, the review is printed to
 
 ## Notes
 
-- The review runs in a self-contained Go binary (`cmd/ai-reviewer`); the only runner requirement is `bash` and `curl` to download it. Release refs (`@X.Y.Z`) download a prebuilt binary from the GitHub release and verify its SHA-256 checksum. Any other ref (`@main`, a commit SHA) builds from source with `actions/setup-go`, which adds roughly 10–30s and puts that Go version on `PATH` for later steps in the same job — run the review in its own job, or pin a release, if that matters.
+- The review runs in a self-contained Go binary (`cmd/ego`); the only runner requirement is `bash` and `curl` to download it. Release refs (`@X.Y.Z`) download a prebuilt binary from the GitHub release and verify its SHA-256 checksum. Any other ref (`@main`, a commit SHA) builds from source with `actions/setup-go`, which adds roughly 10–30s and puts that Go version on `PATH` for later steps in the same job — run the review in its own job, or pin a release, if that matters.
 - Failed requests to the forge (reads only) and the LLM are retried twice on connection errors and HTTP 408/409/429/5xx, honoring `Retry-After`.
 - If the model stops at `max-tokens`, the review is still posted and a warning is logged. If the model declines the request (Anthropic `refusal` stop reason or OpenAI `refusal`), the step fails.
 - The sticky comment is identified by an HTML marker (`<!-- pr-review-action -->`); re-runs update it instead of stacking new comments.

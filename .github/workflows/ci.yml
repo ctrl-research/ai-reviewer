@@ -53,7 +53,7 @@ jobs:
         run: go test -race ./...
 
       - name: Build
-        run: CGO_ENABLED=0 go build -trimpath -o /dev/null ./cmd/ai-reviewer
+        run: CGO_ENABLED=0 go build -trimpath -o /dev/null ./cmd/ego
 
       - name: Lint workflows and action
         run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12

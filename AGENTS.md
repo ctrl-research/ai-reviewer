@@ -2,12 +2,12 @@
 
 ## Purpose
 
-`ai-reviewer` is an LLM-powered pull request review GitHub Action for the `ctrl-research` org (previously `ctrl-research/actions/pr-review`). It ships two artifacts that must stay in sync:
+`ego` ("the reality check between your agents and `main`") is an LLM-powered pull request review GitHub Action for the `ctrl-research` org (previously `ctrl-research/ai-reviewer`, and before that `ctrl-research/actions/pr-review`). It ships two artifacts that must stay in sync:
 
-- **Composite action**: `action.yaml` at the repo root, consumed as `ctrl-research/ai-reviewer@<ref>`
-- **Reusable workflow**: `.github/workflows/pr-review.yaml` (`on: workflow_call`), consumed as `ctrl-research/ai-reviewer/.github/workflows/pr-review.yaml@<ref>`
+- **Composite action**: `action.yaml` at the repo root, consumed as `ctrl-research/ego@<ref>`
+- **Reusable workflow**: `.github/workflows/pr-review.yaml` (`on: workflow_call`), consumed as `ctrl-research/ego/.github/workflows/pr-review.yaml@<ref>`
 
-The review logic is a dependency-free Go program (`cmd/ai-reviewer`, `internal/...`); `action.yaml` only obtains the binary and passes inputs to it as `AI_REVIEWER_*` environment variables.
+The review logic is a dependency-free Go program (`cmd/ego`, `internal/...`); `action.yaml` only obtains the binary and passes inputs to it as `EGO_*` environment variables.
 
 ## Tech stack
 
@@ -32,7 +32,7 @@ The review logic is a dependency-free Go program (`cmd/ai-reviewer`, `internal/.
 │       └── renovate.yaml     # Renovate workflow
 ├── .tool-versions            # Pinned language/tool versions (asdf/mise)
 ├── action.yaml               # Composite action: installs and runs the binary
-├── cmd/ai-reviewer/          # main: CLI flags/env → review.Run → step output
+├── cmd/ego/          # main: CLI flags/env → review.Run → step output
 ├── internal/
 │   ├── forge/                # GitHub / Forgejo API: PR, diff, sticky comment
 │   ├── gha/                  # Workflow commands and $GITHUB_OUTPUT
@@ -64,15 +64,15 @@ Note: the template's YAML check only `echo`s on invalid YAML — it does not fai
 
 ## Architecture
 
-- `action.yaml` — composite action wrapper. For a bare `X.Y.Z` `github.action_ref` it downloads `ai-reviewer_<os>_<arch>[.exe]` from that GitHub release and checks it against `checksums.txt`; for any other ref (or a missing asset) it runs `actions/setup-go` and builds from `github.action_path`. It then runs the binary with every input mapped to an `AI_REVIEWER_*` env var.
+- `action.yaml` — composite action wrapper. For a bare `X.Y.Z` `github.action_ref` it downloads `ego_<os>_<arch>[.exe]` from that GitHub release and checks it against `checksums.txt`; for any other ref (or a missing asset) it runs `actions/setup-go` and builds from `github.action_path`. It then runs the binary with every input mapped to an `EGO_*` env var.
 - The binary: validate config (`internal/review/config.go`) → fetch PR metadata and diff via the forge REST API (no checkout needed) → build prompts → call the LLM → post a sticky PR comment (identified by the `<!-- pr-review-action -->` marker, updated in place on re-runs) → write the `review` output. Keep the marker stable so existing comments keep being updated.
-- `.github/workflows/pr-review.yaml` — reusable workflow wrapper that maps `workflow_call` inputs/secrets onto the composite action (`ctrl-research/ai-reviewer@main`).
+- `.github/workflows/pr-review.yaml` — reusable workflow wrapper that maps `workflow_call` inputs/secrets onto the composite action (`ctrl-research/ego@main`).
 
 Forge abstraction: `github` (`Authorization: Bearer`, diff via `Accept: application/vnd.github.v3.diff`) vs `forgejo`/`gitea` (`Authorization: token`, diff at `/pulls/<n>.diff`).
 
 Provider abstraction: `anthropic` (Messages API, `x-api-key` + `anthropic-version` headers, response text at `.content[] | select(.type=="text")`) vs `openai`/`openai-compatible` (Chat Completions, `Authorization: Bearer`, response at `.choices[0].message.content`). Local endpoints (Ollama/vLLM) use `openai-compatible` with a required `base-url` and optional key.
 
-When adding inputs, update all layers: `action.yaml` (input + `AI_REVIEWER_*` env), `internal/review/config.go` (flag/env + validation), `.github/workflows/pr-review.yaml`, and the inputs table in `README.md`.
+When adding inputs, update all layers: `action.yaml` (input + `EGO_*` env), `internal/review/config.go` (flag/env + validation), `.github/workflows/pr-review.yaml`, and the inputs table in `README.md`.
 
 ## Conventions
 
