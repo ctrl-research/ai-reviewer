@@ -1,0 +1,31 @@
+name: Self Review
+run-name: Self review for ${{ github.event.pull_request.title }}
+
+# Reviews every PR to this repo with the PR's own code (uses: ./ builds the
+# action from the checked-out source), so changes are exercised end to end on
+# a real runner before they're released.
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: self-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    # PRs from forks get no secrets; skip instead of failing on a missing key.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4.2.2
+
+      - name: Review with this branch's code
+        uses: ./
+        with:
+          api-key: ${{ secrets.ANTHROPIC_API_KEY }}

@@ -28,6 +28,7 @@ The review logic is a dependency-free Go program (`cmd/ai-reviewer`, `internal/.
 │       ├── ci.yml            # YAML parse + committed-secrets check
 │       ├── pr-review.yaml    # Reusable workflow wrapper for the action
 │       ├── release.yaml      # Label-driven SemVer release workflow
+│       ├── self-review.yaml  # Reviews this repo's PRs with the PR's own code (uses: ./)
 │       └── renovate.yaml     # Renovate workflow
 ├── .tool-versions            # Pinned language/tool versions (asdf/mise)
 ├── action.yaml               # Composite action: installs and runs the binary
