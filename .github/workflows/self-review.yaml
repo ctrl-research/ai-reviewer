@@ -1,12 +1,20 @@
 name: Self Review
 run-name: Self review for ${{ github.event.pull_request.title }}
 
-# Reviews every PR to this repo with the PR's own code (uses: ./ builds the
-# action from the checked-out source), so changes are exercised end to end on
-# a real runner before they're released.
+# Reviews every PR to this repo with the latest *merged* ego (main), never the
+# PR's own code.
+#
+# Security: this uses pull_request_target so that both this workflow file and
+# the action come from the base branch. With plain pull_request, GitHub runs the
+# workflow from the PR branch, so anyone able to push a branch could edit it to
+# print the LLM secrets. pull_request_target runs with secrets and a write
+# token, which is only safe because nothing from the PR is ever executed: the
+# checkout below is the base commit, and ego reads the diff through the API
+# and sends it to the LLM as data. Never check out or run the PR head here.
 
 on:
-  pull_request:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: read
@@ -18,14 +26,19 @@ concurrency:
 
 jobs:
   review:
-    # PRs from forks get no secrets; skip instead of failing on a missing key.
+    # Fork PRs are skipped: they'd be reviewed safely (no PR code runs), but
+    # would spend the org's LLM quota on anyone's PR.
     if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
+      - name: Checkout merged code (base branch)
         uses: actions/checkout@v4.2.2
+        with:
+          # Explicitly the base branch commit, never the PR head.
+          ref: ${{ github.sha }}
+          persist-credentials: false
 
-      - name: Review with this branch's code
+      - name: Review with the merged action
         uses: ./
         with:
           api-key: ${{ secrets.ANTHROPIC_API_KEY }}

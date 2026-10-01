@@ -28,7 +28,7 @@ The review logic is a dependency-free Go program (`cmd/ego`, `internal/...`); `a
 │       ├── ci.yml            # YAML parse + committed-secrets check
 │       ├── pr-review.yaml    # Reusable workflow wrapper for the action
 │       ├── release.yaml      # Label-driven SemVer release workflow
-│       ├── self-review.yaml  # Reviews this repo's PRs with the PR's own code (uses: ./)
+│       ├── self-review.yaml  # Reviews this repo's PRs with merged ego via pull_request_target; never runs PR code
 │       └── renovate.yaml     # Renovate workflow
 ├── .tool-versions            # Pinned language/tool versions (asdf/mise)
 ├── action.yaml               # Composite action: installs and runs the binary
@@ -80,6 +80,7 @@ When adding inputs, update all layers: `action.yaml` (input + `EGO_*` env), `int
 - Action files are named `action.yaml` (not `action.yml`); `runs.using: composite`; every step needs `shell: bash`.
 - Inputs are kebab-case; secrets are passed to the composite action as inputs (composite actions cannot read `secrets` directly).
 - Pass untrusted values (PR titles, inputs) to bash via `env:` blocks, never inline `${{ }}` interpolation in `run:`.
+- `self-review.yaml` runs on `pull_request_target` with secrets. It must only ever check out the base commit and run `uses: ./` from it; never check out, build or run the PR head there.
 - Keep secrets off the argv: the forge token and LLM key are env-only (no flags). All HTTP goes through `httpx.NewClient`, which never follows redirects.
 - Standard library only; adding a Go module dependency needs a clear justification.
 - Pin third-party actions to exact versions; Renovate manages bumps.
