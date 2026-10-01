@@ -1,0 +1,161 @@
+package llm
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/ctrl-research/ai-reviewer/internal/httpx"
+)
+
+type captured struct {
+	path    string
+	headers http.Header
+	body    map[string]any
+}
+
+// serve starts a fake provider that records the request and replies with
+// status and response.
+func serve(t *testing.T, status int, response string) (*captured, string) {
+	t.Helper()
+	got := &captured{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got.path = r.URL.Path
+		got.headers = r.Header.Clone()
+		raw, _ := io.ReadAll(r.Body)
+		if err := json.Unmarshal(raw, &got.body); err != nil {
+			t.Errorf("request body is not JSON: %v", err)
+		}
+		w.WriteHeader(status)
+		io.WriteString(w, response)
+	}))
+	t.Cleanup(srv.Close)
+	return got, srv.URL
+}
+
+func newTestClient(t *testing.T, provider, baseURL, key string) *Client {
+	t.Helper()
+	c, err := New(provider, baseURL, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.HTTP = httpx.NewClient(5 * time.Second)
+	c.Retry = httpx.Retry{Attempts: 1}
+	return c
+}
+
+var req = Request{Model: "m", System: "sys", Prompt: "diff", MaxTokens: 123}
+
+func TestAnthropicRequestAndResponse(t *testing.T) {
+	got, url := serve(t, 200, `{"content":[{"type":"thinking","thinking":""},{"type":"text","text":"part 1"},{"type":"text","text":"part 2"}],"stop_reason":"end_turn"}`)
+	res, err := newTestClient(t, Anthropic, url+"/", "key").Review(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Text != "part 1\npart 2" || res.Truncated {
+		t.Errorf("result = %+v", res)
+	}
+	if got.path != "/v1/messages" {
+		t.Errorf("path = %s", got.path)
+	}
+	if got.headers.Get("x-api-key") != "key" || got.headers.Get("anthropic-version") != "2023-06-01" {
+		t.Errorf("headers = %v", got.headers)
+	}
+	if got.body["system"] != "sys" || got.body["model"] != "m" || got.body["max_tokens"] != float64(123) {
+		t.Errorf("body = %v", got.body)
+	}
+	msgs := got.body["messages"].([]any)
+	if len(msgs) != 1 || msgs[0].(map[string]any)["content"] != "diff" {
+		t.Errorf("messages = %v", msgs)
+	}
+}
+
+func TestAnthropicStopReasons(t *testing.T) {
+	_, url := serve(t, 200, `{"content":[{"type":"text","text":"partial"}],"stop_reason":"max_tokens"}`)
+	res, err := newTestClient(t, Anthropic, url, "key").Review(context.Background(), req)
+	if err != nil || !res.Truncated {
+		t.Errorf("max_tokens: res=%+v err=%v", res, err)
+	}
+
+	_, url = serve(t, 200, `{"content":[],"stop_reason":"refusal","stop_details":{"type":"refusal","category":"cyber","explanation":"nope"}}`)
+	_, err = newTestClient(t, Anthropic, url, "key").Review(context.Background(), req)
+	if err == nil || !strings.Contains(err.Error(), "declined") || !strings.Contains(err.Error(), "cyber") {
+		t.Errorf("refusal: err = %v", err)
+	}
+
+	_, url = serve(t, 200, `{"content":[],"stop_reason":"end_turn"}`)
+	_, err = newTestClient(t, Anthropic, url, "key").Review(context.Background(), req)
+	if !errors.Is(err, ErrEmpty) {
+		t.Errorf("empty: err = %v", err)
+	}
+}
+
+func TestOpenAIRequestAndResponse(t *testing.T) {
+	got, url := serve(t, 200, `{"choices":[{"message":{"content":"looks good"},"finish_reason":"length"}]}`)
+	res, err := newTestClient(t, OpenAI, url, "key").Review(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Text != "looks good" || !res.Truncated {
+		t.Errorf("result = %+v", res)
+	}
+	if got.path != "/chat/completions" || got.headers.Get("Authorization") != "Bearer key" {
+		t.Errorf("path=%s auth=%q", got.path, got.headers.Get("Authorization"))
+	}
+	msgs := got.body["messages"].([]any)
+	if len(msgs) != 2 || msgs[0].(map[string]any)["role"] != "system" {
+		t.Errorf("messages = %v", msgs)
+	}
+}
+
+func TestOpenAICompatibleWithoutKey(t *testing.T) {
+	got, url := serve(t, 200, `{"choices":[{"message":{"content":"ok"}}]}`)
+	if _, err := newTestClient(t, OpenAICompatible, url+"/v1", "").Review(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	if got.path != "/v1/chat/completions" {
+		t.Errorf("path = %s", got.path)
+	}
+	if _, ok := got.headers["Authorization"]; ok {
+		t.Error("Authorization header sent without an API key")
+	}
+}
+
+func TestOpenAIRefusalAndEmpty(t *testing.T) {
+	_, url := serve(t, 200, `{"choices":[{"message":{"content":null,"refusal":"can't help"}}]}`)
+	if _, err := newTestClient(t, OpenAI, url, "k").Review(context.Background(), req); err == nil || !strings.Contains(err.Error(), "can't help") {
+		t.Errorf("refusal: err = %v", err)
+	}
+	_, url = serve(t, 200, `{"choices":[]}`)
+	if _, err := newTestClient(t, OpenAI, url, "k").Review(context.Background(), req); !errors.Is(err, ErrEmpty) {
+		t.Errorf("empty: err = %v", err)
+	}
+}
+
+func TestHTTPErrorIncludesBody(t *testing.T) {
+	_, url := serve(t, 401, `{"error":"invalid key"}`)
+	_, err := newTestClient(t, Anthropic, url, "bad").Review(context.Background(), req)
+	var serr *httpx.StatusError
+	if !errors.As(err, &serr) || serr.Status != 401 || !strings.Contains(serr.Body, "invalid key") {
+		t.Errorf("err = %v", err)
+	}
+}
+
+func TestNewValidatesProvider(t *testing.T) {
+	if _, err := New(OpenAICompatible, "", ""); err == nil {
+		t.Error("openai-compatible without base URL: want error")
+	}
+	if _, err := New("bogus", "", ""); err == nil {
+		t.Error("unknown provider: want error")
+	}
+	c, err := New(OpenAI, "", "k")
+	if err != nil || c.URL != "https://api.openai.com/v1/chat/completions" {
+		t.Errorf("default OpenAI URL = %q err=%v", c.URL, err)
+	}
+}
