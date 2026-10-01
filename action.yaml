@@ -1,5 +1,5 @@
 name: ego
-description: 'The reality check between your agents and main: LLM-powered pull request review for GitHub and Forgejo/Gitea. Supports Anthropic, OpenAI, and any OpenAI-compatible endpoint (Ollama, vLLM, LM Studio, OpenRouter, etc.).'
+description: 'A little perspective for your pull requests: LLM-powered pull request review for GitHub and Forgejo/Gitea. Supports Anthropic, OpenAI, and any OpenAI-compatible endpoint (Ollama, vLLM, LM Studio, OpenRouter, etc.).'
 
 inputs:
   platform:
