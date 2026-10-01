@@ -1,8 +1,11 @@
 # ego
 
-**The reality check between your agents and `main`.**
+> *"Do you know what I'm craving? A little perspective."*
+> — Anton Ego, *Ratatouille*
 
-In Freud's model of the mind, the *id* acts on impulse, the *superego* holds the rules, and the *ego* weighs the two against reality before anything happens. Agentic development has the same shape: coding agents generate changes on impulse, your conventions sit above them, and `ego` is the step that checks the result before it merges. (It's also named for a certain food critic.)
+`ego` is that perspective for your pull requests: an outside reviewer that reads the diff before it merges.
+
+The name also borrows from Freud. In his model of the mind, the *id* acts on impulse, the *superego* holds the rules, and the *ego* weighs the two against reality before anything happens. Agentic development has the same shape: coding agents generate changes on impulse, your conventions sit above them, and `ego` is the reality check before anything reaches `main`.
 
 LLM-powered pull request review. Fetches the PR diff, sends it to a configurable LLM provider, and posts the review as a sticky PR comment (updated in place on subsequent pushes).
 

@@ -2,7 +2,7 @@
 
 ## Purpose
 
-`ego` ("the reality check between your agents and `main`") is an LLM-powered pull request review GitHub Action for the `ctrl-research` org (previously `ctrl-research/ai-reviewer`, and before that `ctrl-research/actions/pr-review`). It ships two artifacts that must stay in sync:
+`ego` (tagline: Anton Ego's "Do you know what I'm craving? A little perspective.") is an LLM-powered pull request review GitHub Action for the `ctrl-research` org (previously `ctrl-research/ai-reviewer`, and before that `ctrl-research/actions/pr-review`). It ships two artifacts that must stay in sync:
 
 - **Composite action**: `action.yaml` at the repo root, consumed as `ctrl-research/ego@<ref>`
 - **Reusable workflow**: `.github/workflows/pr-review.yaml` (`on: workflow_call`), consumed as `ctrl-research/ego/.github/workflows/pr-review.yaml@<ref>`
