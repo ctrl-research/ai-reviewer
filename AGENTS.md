@@ -7,10 +7,11 @@
 - **Composite action**: `action.yaml` at the repo root, consumed as `ctrl-research/ai-reviewer@<ref>`
 - **Reusable workflow**: `.github/workflows/pr-review.yaml` (`on: workflow_call`), consumed as `ctrl-research/ai-reviewer/.github/workflows/pr-review.yaml@<ref>`
 
-There is no application code, build step, or test suite — everything is YAML + bash steps using preinstalled runner tools (`jq`, `curl`).
+The review logic is a dependency-free Go program (`cmd/ai-reviewer`, `internal/...`); `action.yaml` only obtains the binary and passes inputs to it as `AI_REVIEWER_*` environment variables.
 
 ## Tech stack
 
+- **Go** (version pinned in `.tool-versions`), standard library only — no third-party modules
 - **GitHub Actions** composite action + reusable workflow (also runs on Forgejo/Gitea Actions)
 - **Renovate** for dependency updates (managers: `asdf`, `docker-compose`, `github-actions`, `gomod`)
 - **MIT License**
@@ -29,7 +30,15 @@ There is no application code, build step, or test suite — everything is YAML +
 │       ├── release.yaml      # Label-driven SemVer release workflow
 │       └── renovate.yaml     # Renovate workflow
 ├── .tool-versions            # Pinned language/tool versions (asdf/mise)
-├── action.yaml               # Composite action: LLM-powered PR review
+├── action.yaml               # Composite action: installs and runs the binary
+├── cmd/ai-reviewer/          # main: CLI flags/env → review.Run → step output
+├── internal/
+│   ├── forge/                # GitHub / Forgejo API: PR, diff, sticky comment
+│   ├── gha/                  # Workflow commands and $GITHUB_OUTPUT
+│   ├── httpx/                # No-redirect client, retries, bounded bodies
+│   ├── llm/                  # Anthropic Messages / OpenAI Chat Completions
+│   └── review/               # Config validation, prompts, pipeline
+├── go.mod
 ├── AGENTS.md                 # Operational expectations for humans and AI agents
 ├── CONTRIBUTING.md
 ├── LICENSE
@@ -40,28 +49,29 @@ There is no application code, build step, or test suite — everything is YAML +
 
 ## Validation
 
-CI (`.github/workflows/ci.yml`) only checks YAML parseability and greps for committed secrets. Validate locally before pushing:
+CI (`.github/workflows/ci.yml`) runs gofmt, `go vet`, `go test -race`, a build, and actionlint, plus the template's YAML-parse and committed-secrets checks. Run the same locally (with the Go version from `.tool-versions`):
 
 ```bash
-# YAML syntax (what CI does)
-python3 -c "import yaml; yaml.safe_load(open('action.yaml'))"
-
-# Workflow lint (if installed)
-actionlint .github/workflows/pr-review.yaml
+gofmt -l .                # must print nothing
+go vet ./...
+go test -race ./...
+go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+python3 -c "import yaml; yaml.safe_load(open('action.yaml'))"   # actionlint doesn't cover action.yaml
 ```
 
-Note: the CI YAML check only `echo`s on invalid YAML — it does not fail the job. Don't rely on CI to catch syntax errors.
+Note: the template's YAML check only `echo`s on invalid YAML — it does not fail the job.
 
 ## Architecture
 
-- `action.yaml` — composite action. Pure bash/jq/curl pipeline: validate inputs → fetch PR metadata and diff via the forge REST API (no checkout needed) → build prompts → call the LLM → post a sticky PR comment (identified by the `<!-- pr-review-action -->` marker, updated in place on re-runs). Keep the marker stable so existing comments keep being updated.
+- `action.yaml` — composite action wrapper. For a bare `X.Y.Z` `github.action_ref` it downloads `ai-reviewer_<os>_<arch>[.exe]` from that GitHub release and checks it against `checksums.txt`; for any other ref (or a missing asset) it runs `actions/setup-go` and builds from `github.action_path`. It then runs the binary with every input mapped to an `AI_REVIEWER_*` env var.
+- The binary: validate config (`internal/review/config.go`) → fetch PR metadata and diff via the forge REST API (no checkout needed) → build prompts → call the LLM → post a sticky PR comment (identified by the `<!-- pr-review-action -->` marker, updated in place on re-runs) → write the `review` output. Keep the marker stable so existing comments keep being updated.
 - `.github/workflows/pr-review.yaml` — reusable workflow wrapper that maps `workflow_call` inputs/secrets onto the composite action (`ctrl-research/ai-reviewer@main`).
 
 Forge abstraction: `github` (`Authorization: Bearer`, diff via `Accept: application/vnd.github.v3.diff`) vs `forgejo`/`gitea` (`Authorization: token`, diff at `/pulls/<n>.diff`).
 
 Provider abstraction: `anthropic` (Messages API, `x-api-key` + `anthropic-version` headers, response text at `.content[] | select(.type=="text")`) vs `openai`/`openai-compatible` (Chat Completions, `Authorization: Bearer`, response at `.choices[0].message.content`). Local endpoints (Ollama/vLLM) use `openai-compatible` with a required `base-url` and optional key.
 
-When adding inputs, update both layers and the inputs table in `README.md`.
+When adding inputs, update all layers: `action.yaml` (input + `AI_REVIEWER_*` env), `internal/review/config.go` (flag/env + validation), `.github/workflows/pr-review.yaml`, and the inputs table in `README.md`.
 
 ## Conventions
 
@@ -69,7 +79,8 @@ When adding inputs, update both layers and the inputs table in `README.md`.
 - Action files are named `action.yaml` (not `action.yml`); `runs.using: composite`; every step needs `shell: bash`.
 - Inputs are kebab-case; secrets are passed to the composite action as inputs (composite actions cannot read `secrets` directly).
 - Pass untrusted values (PR titles, inputs) to bash via `env:` blocks, never inline `${{ }}` interpolation in `run:`.
-- Keep secrets off the argv: auth headers go in 0600 curl config files; never follow redirects with the forge token.
+- Keep secrets off the argv: the forge token and LLM key are env-only (no flags). All HTTP goes through `httpx.NewClient`, which never follows redirects.
+- Standard library only; adding a Go module dependency needs a clear justification.
 - Pin third-party actions to exact versions; Renovate manages bumps.
 - Versioning: releases follow [SemVer](https://semver.org/) as bare `X.Y.Z` — no `v` prefix (`1.4.2`, not `v1.4.2`). Bump MAJOR for breaking changes (e.g. removing/renaming inputs or outputs, changing defaults), MINOR for backwards-compatible features, PATCH for fixes.
 - Conventional commits (`feat`, `fix`, `chore`, `docs`, `ci`, ...); see CONTRIBUTING.md.
@@ -84,4 +95,4 @@ When adding inputs, update both layers and the inputs table in `README.md`.
   - `patch` — fixes
   - No label — defaults to a `patch` bump
 - **Manual releases**: a specific version may be cut manually by supplying an explicit `X.Y.Z` version via workflow dispatch. This bypasses the label-based bump.
-- Release automation lives in `.github/workflows/release.yaml`: it computes the next version, tags, and creates the GitHub release. The action is consumed straight from the tag, so there are no artifacts to build or publish.
+- Release automation lives in `.github/workflows/release.yaml`: it computes the next version, runs tests, cross-compiles the binaries (linux/darwin/windows × amd64/arm64) with `checksums.txt`, tags, and creates the GitHub release with those assets attached. Asset names are part of the contract with `action.yaml` — change both together.

@@ -77,6 +77,32 @@ jobs:
           echo "base=${BASE} labels=[${LABELS:-none}] bump=${LEVEL} version=${VERSION}"
           echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
 
+      - name: Set up Go
+        uses: actions/setup-go@v7.0.0
+        with:
+          go-version-file: .tool-versions
+
+      # Build before tagging so a broken build never leaves a tag without
+      # binaries. action.yaml downloads these assets for release refs.
+      - name: Build release binaries
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          go test ./...
+          mkdir -p dist
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
+            os="${target%/*}"
+            arch="${target#*/}"
+            ext=""
+            [[ "$os" == windows ]] && ext=".exe"
+            CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -trimpath \
+              -ldflags "-s -w -X main.version=${VERSION}" \
+              -o "dist/ai-reviewer_${os}_${arch}${ext}" ./cmd/ai-reviewer
+          done
+          (cd dist && sha256sum ai-reviewer_* > checksums.txt)
+          cat dist/checksums.txt
+
       - name: Tag release
         env:
           VERSION: ${{ steps.version.outputs.version }}
@@ -87,12 +113,6 @@ jobs:
           git tag -a "${VERSION}" -m "Release ${VERSION}"
           git push origin "refs/tags/${VERSION}"
 
-      # TODO(project): build and publish release artifacts for this version, e.g.:
-      #   - docker build -t <registry>/<image>:${VERSION} . && docker push <registry>/<image>:${VERSION}
-      #   - go build / goreleaser release
-      #   - npm publish / cargo publish
-      # Then attach files to the release with: gh release upload "${VERSION}" <files...>
-      #
       # NOTE: pushes/creations made with the default GITHUB_TOKEN do NOT trigger
       # other workflows (e.g. on: push of tags, on: release). If release events
       # must fan out to further automation, use a PAT or a GitHub App token
@@ -105,4 +125,5 @@ jobs:
         run: |
           gh release create "${VERSION}" \
             --title "${VERSION}" \
-            --generate-notes
+            --generate-notes \
+            dist/*
