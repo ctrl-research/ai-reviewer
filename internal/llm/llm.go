@@ -212,10 +212,34 @@ func parseOpenAI(body []byte) (*Result, error) {
 	if ref := choice.Message.Refusal; ref != nil && *ref != "" {
 		return nil, fmt.Errorf("model declined to review: %s", *ref)
 	}
-	if choice.Message.Content == nil || strings.TrimSpace(*choice.Message.Content) == "" {
+	truncated := choice.FinishReason == "length"
+	if choice.Message.Content == nil {
 		return nil, ErrEmpty
 	}
-	return &Result{Text: *choice.Message.Content, Truncated: choice.FinishReason == "length"}, nil
+	text, finished := stripThinking(*choice.Message.Content)
+	if !finished && truncated {
+		return nil, errors.New("model stopped at max-tokens before finishing its reasoning; raise max-tokens")
+	}
+	if strings.TrimSpace(text) == "" {
+		return nil, ErrEmpty
+	}
+	return &Result{Text: text, Truncated: truncated}, nil
+}
+
+// stripThinking removes a leading <think>…</think> block from s. Some
+// OpenAI-compatible servers (MiniMax M2, DeepSeek-R1 and Qwen via Ollama)
+// return the model's reasoning inline in content this way. finished is false
+// when the block was opened but never closed.
+func stripThinking(s string) (text string, finished bool) {
+	t := strings.TrimLeft(s, " \t\r\n")
+	if !strings.HasPrefix(t, "<think>") {
+		return s, true
+	}
+	end := strings.Index(t, "</think>")
+	if end < 0 {
+		return "", false
+	}
+	return strings.TrimLeft(t[end+len("</think>"):], " \t\r\n"), true
 }
 
 func or(v, fallback string) string {

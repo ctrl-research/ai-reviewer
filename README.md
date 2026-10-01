@@ -175,6 +175,7 @@ With `--post-comment=false` and no `GITHUB_OUTPUT` set, the review is printed to
 - If the model stops at `max-tokens`, the review is still posted and a warning is logged. If the model declines the request (Anthropic `refusal` stop reason or OpenAI `refusal`), the step fails.
 - The sticky comment is identified by an HTML marker (`<!-- pr-review-action -->`); re-runs update it instead of stacking new comments.
 - Diffs larger than `max-diff-bytes` are truncated with a notice appended, so the model knows the diff is partial.
+- On the `openai`/`openai-compatible` path, a leading `<think>…</think>` block in the response (how MiniMax M2.x, DeepSeek-R1 and Qwen via Ollama return reasoning) is stripped before posting. Reasoning counts toward `max-tokens`; if the model runs out mid-thought, the step fails and asks you to raise it.
 - The `openai`/`openai-compatible` path sends `max_tokens`; some newer OpenAI models require `max_completion_tokens` instead — prefer broadly-compatible models or a proxy (LiteLLM) if you hit that.
 
 ## Security
