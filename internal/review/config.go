@@ -8,12 +8,12 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/ctrl-research/ai-reviewer/internal/forge"
-	"github.com/ctrl-research/ai-reviewer/internal/llm"
+	"github.com/ctrl-research/ego/internal/forge"
+	"github.com/ctrl-research/ego/internal/llm"
 )
 
 // Config is the full set of review settings. In the action every field comes
-// from an AI_REVIEWER_* environment variable set by action.yaml; locally the
+// from an EGO_* environment variable set by action.yaml; locally the
 // non-secret fields can also be given as flags.
 type Config struct {
 	Platform     string
@@ -36,7 +36,7 @@ type Config struct {
 // LLM API key) are environment-only so they never appear in the process list.
 func Load(getenv func(string) string, args []string) (*Config, error) {
 	env := func(name, fallback string) string {
-		if v := getenv("AI_REVIEWER_" + name); v != "" {
+		if v := getenv("EGO_" + name); v != "" {
 			return v
 		}
 		return fallback
@@ -46,10 +46,10 @@ func Load(getenv func(string) string, args []string) (*Config, error) {
 		APIKey: env("API_KEY", ""),
 		// Free text: an empty value means "use the built-in prompt", so it is
 		// read verbatim rather than through the fallback helper.
-		ReviewPrompt: getenv("AI_REVIEWER_REVIEW_PROMPT"),
+		ReviewPrompt: getenv("EGO_REVIEW_PROMPT"),
 	}
 
-	fs := flag.NewFlagSet("ai-reviewer", flag.ContinueOnError)
+	fs := flag.NewFlagSet("ego", flag.ContinueOnError)
 	fs.StringVar(&c.Platform, "platform", env("PLATFORM", "github"), "forge hosting the PR: github or forgejo (also covers gitea)")
 	fs.StringVar(&c.APIURL, "api-url", env("API_URL", or(getenv("GITHUB_API_URL"), "https://api.github.com")), "forge REST API base URL")
 	fs.StringVar(&c.Repo, "repo", env("REPO", getenv("GITHUB_REPOSITORY")), "repository as owner/name")
@@ -61,9 +61,9 @@ func Load(getenv func(string) string, args []string) (*Config, error) {
 	fs.StringVar(&c.MaxDiffBytes, "max-diff-bytes", env("MAX_DIFF_BYTES", "300000"), "truncate the diff beyond this many bytes")
 	fs.StringVar(&c.PostComment, "post-comment", env("POST_COMMENT", "true"), "post the review as a sticky PR comment")
 	fs.Usage = func() {
-		fmt.Fprintf(fs.Output(), "Usage: ai-reviewer [flags]\n\nSecrets are read from the environment only:\n"+
-			"  AI_REVIEWER_TOKEN    forge token (falls back to GITHUB_TOKEN)\n"+
-			"  AI_REVIEWER_API_KEY  LLM provider API key\n\nFlags:\n")
+		fmt.Fprintf(fs.Output(), "Usage: ego [flags]\n\nSecrets are read from the environment only:\n"+
+			"  EGO_TOKEN    forge token (falls back to GITHUB_TOKEN)\n"+
+			"  EGO_API_KEY  LLM provider API key\n\nFlags:\n")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {

@@ -98,9 +98,9 @@ jobs:
             [[ "$os" == windows ]] && ext=".exe"
             CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -trimpath \
               -ldflags "-s -w -X main.version=${VERSION}" \
-              -o "dist/ai-reviewer_${os}_${arch}${ext}" ./cmd/ai-reviewer
+              -o "dist/ego_${os}_${arch}${ext}" ./cmd/ego
           done
-          (cd dist && sha256sum ai-reviewer_* > checksums.txt)
+          (cd dist && sha256sum ego_* > checksums.txt)
           cat dist/checksums.txt
 
       - name: Tag release

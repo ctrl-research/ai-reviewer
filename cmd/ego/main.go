@@ -1,8 +1,8 @@
-// Command ai-reviewer reviews a pull request with an LLM and posts the result
-// as a sticky PR comment. It is the engine behind the ai-reviewer GitHub
+// Command ego reviews a pull request with an LLM and posts the result
+// as a sticky PR comment. It is the engine behind the ego GitHub
 // Action and can also be run locally:
 //
-//	AI_REVIEWER_TOKEN=... AI_REVIEWER_API_KEY=... ai-reviewer --repo owner/name --pr 42 --post-comment=false
+//	EGO_TOKEN=... EGO_API_KEY=... ego --repo owner/name --pr 42 --post-comment=false
 package main
 
 import (
@@ -13,11 +13,11 @@ import (
 	"os"
 	"os/signal"
 
-	"github.com/ctrl-research/ai-reviewer/internal/forge"
-	"github.com/ctrl-research/ai-reviewer/internal/gha"
-	"github.com/ctrl-research/ai-reviewer/internal/httpx"
-	"github.com/ctrl-research/ai-reviewer/internal/llm"
-	"github.com/ctrl-research/ai-reviewer/internal/review"
+	"github.com/ctrl-research/ego/internal/forge"
+	"github.com/ctrl-research/ego/internal/gha"
+	"github.com/ctrl-research/ego/internal/httpx"
+	"github.com/ctrl-research/ego/internal/llm"
+	"github.com/ctrl-research/ego/internal/review"
 )
 
 // version is set at build time with -ldflags "-X main.version=X.Y.Z".

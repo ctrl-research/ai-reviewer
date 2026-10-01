@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ctrl-research/ai-reviewer/internal/httpx"
+	"github.com/ctrl-research/ego/internal/httpx"
 )
 
 // fakeForge is an in-memory issue-comments API for one PR.

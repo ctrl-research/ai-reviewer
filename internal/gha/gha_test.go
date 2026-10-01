@@ -19,7 +19,7 @@ func TestSetOutputUsesRandomDelimiter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := regexp.MustCompile(`(?s)^review<<(AI_REVIEWER_EOF_[0-9a-f]{32})\n(.*)\n(AI_REVIEWER_EOF_[0-9a-f]{32})\n$`).FindSubmatch(got)
+	m := regexp.MustCompile(`(?s)^review<<(EGO_EOF_[0-9a-f]{32})\n(.*)\n(EGO_EOF_[0-9a-f]{32})\n$`).FindSubmatch(got)
 	if m == nil {
 		t.Fatalf("unexpected output file:\n%s", got)
 	}

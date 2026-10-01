@@ -1,5 +1,5 @@
-name: PR Review
-description: 'LLM-powered pull request review for GitHub and Forgejo/Gitea. Supports Anthropic, OpenAI, and any OpenAI-compatible endpoint (Ollama, vLLM, LM Studio, OpenRouter, etc.).'
+name: ego
+description: 'The reality check between your agents and main: LLM-powered pull request review for GitHub and Forgejo/Gitea. Supports Anthropic, OpenAI, and any OpenAI-compatible endpoint (Ollama, vLLM, LM Studio, OpenRouter, etc.).'
 
 inputs:
   platform:
@@ -59,17 +59,17 @@ outputs:
 runs:
   using: "composite"
 
-  # The review itself is done by the ai-reviewer Go binary (cmd/ai-reviewer).
+  # The review itself is done by the ego Go binary (cmd/ego).
   # These steps only obtain the binary and hand it the inputs.
   steps:
-    - name: Install ai-reviewer
+    - name: Install ego
       id: install
       shell: bash
       env:
         ACTION_REF: ${{ github.action_ref }}
       run: |
         set -euo pipefail
-        bin_dir="$RUNNER_TEMP/ai-reviewer"
+        bin_dir="$RUNNER_TEMP/ego"
         mkdir -p "$bin_dir"
 
         case "${RUNNER_OS:-$(uname -s)}" in
@@ -85,14 +85,14 @@ runs:
         esac
         ext=""
         [[ "$os" == windows ]] && ext=".exe"
-        bin="$bin_dir/ai-reviewer$ext"
+        bin="$bin_dir/ego$ext"
         echo "path=$bin" >> "$GITHUB_OUTPUT"
 
         # Release tags are bare X.Y.Z and have prebuilt binaries. Any other ref
         # (a branch such as main, or a commit SHA) is built from source.
         if [[ "$ACTION_REF" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && -n "$os" && -n "$arch" ]]; then
-          base="https://github.com/ctrl-research/ai-reviewer/releases/download/$ACTION_REF"
-          asset="ai-reviewer_${os}_${arch}${ext}"
+          base="https://github.com/ctrl-research/ego/releases/download/$ACTION_REF"
+          asset="ego_${os}_${arch}${ext}"
           if curl -fsSL --retry 2 -o "$bin" "$base/$asset" &&
              curl -fsSL --retry 2 -o "$bin_dir/checksums.txt" "$base/checksums.txt"; then
             expected=$(awk -v f="$asset" '$2 == f { print $1 }' "$bin_dir/checksums.txt")
@@ -106,11 +106,11 @@ runs:
               exit 1
             fi
             chmod +x "$bin"
-            echo "Using prebuilt ai-reviewer $ACTION_REF ($asset)"
+            echo "Using prebuilt ego $ACTION_REF ($asset)"
             echo "build=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          echo "::warning::No prebuilt ai-reviewer binary for $ACTION_REF ($asset); building from source."
+          echo "::warning::No prebuilt ego binary for $ACTION_REF ($asset); building from source."
         fi
         echo "build=true" >> "$GITHUB_OUTPUT"
 
@@ -121,31 +121,31 @@ runs:
         go-version-file: ${{ github.action_path }}/.tool-versions
         cache: false
 
-    - name: Build ai-reviewer from source
+    - name: Build ego from source
       if: steps.install.outputs.build == 'true'
       shell: bash
       working-directory: ${{ github.action_path }}
       env:
         BIN: ${{ steps.install.outputs.path }}
         CGO_ENABLED: "0"
-      run: go build -trimpath -ldflags "-X main.version=source" -o "$BIN" ./cmd/ai-reviewer
+      run: go build -trimpath -ldflags "-X main.version=source" -o "$BIN" ./cmd/ego
 
     - name: Review pull request
       id: review
       shell: bash
       env:
-        AI_REVIEWER_BIN: ${{ steps.install.outputs.path }}
-        AI_REVIEWER_PLATFORM: ${{ inputs.platform }}
-        AI_REVIEWER_API_URL: ${{ inputs.api-url }}
-        AI_REVIEWER_REPO: ${{ github.repository }}
-        AI_REVIEWER_TOKEN: ${{ inputs.github-token }}
-        AI_REVIEWER_PR_NUMBER: ${{ inputs.pr-number }}
-        AI_REVIEWER_PROVIDER: ${{ inputs.provider }}
-        AI_REVIEWER_BASE_URL: ${{ inputs.base-url }}
-        AI_REVIEWER_MODEL: ${{ inputs.model }}
-        AI_REVIEWER_API_KEY: ${{ inputs.api-key }}
-        AI_REVIEWER_MAX_TOKENS: ${{ inputs.max-tokens }}
-        AI_REVIEWER_MAX_DIFF_BYTES: ${{ inputs.max-diff-bytes }}
-        AI_REVIEWER_REVIEW_PROMPT: ${{ inputs.review-prompt }}
-        AI_REVIEWER_POST_COMMENT: ${{ inputs.post-comment }}
-      run: '"$AI_REVIEWER_BIN"'
+        EGO_BIN: ${{ steps.install.outputs.path }}
+        EGO_PLATFORM: ${{ inputs.platform }}
+        EGO_API_URL: ${{ inputs.api-url }}
+        EGO_REPO: ${{ github.repository }}
+        EGO_TOKEN: ${{ inputs.github-token }}
+        EGO_PR_NUMBER: ${{ inputs.pr-number }}
+        EGO_PROVIDER: ${{ inputs.provider }}
+        EGO_BASE_URL: ${{ inputs.base-url }}
+        EGO_MODEL: ${{ inputs.model }}
+        EGO_API_KEY: ${{ inputs.api-key }}
+        EGO_MAX_TOKENS: ${{ inputs.max-tokens }}
+        EGO_MAX_DIFF_BYTES: ${{ inputs.max-diff-bytes }}
+        EGO_REVIEW_PROMPT: ${{ inputs.review-prompt }}
+        EGO_POST_COMMENT: ${{ inputs.post-comment }}
+      run: '"$EGO_BIN"'

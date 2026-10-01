@@ -1,5 +1,5 @@
 // Package gha implements the small subset of the GitHub Actions runner
-// protocol (workflow commands and step outputs) that ai-reviewer needs.
+// protocol (workflow commands and step outputs) that ego needs.
 // Forgejo/Gitea Actions runners speak the same protocol.
 package gha
 
@@ -63,7 +63,7 @@ func SetOutput(path, name, value string) error {
 	if _, err := rand.Read(buf); err != nil {
 		return fmt.Errorf("generate output delimiter: %w", err)
 	}
-	delim := "AI_REVIEWER_EOF_" + hex.EncodeToString(buf)
+	delim := "EGO_EOF_" + hex.EncodeToString(buf)
 
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0o600)
 	if err != nil {
