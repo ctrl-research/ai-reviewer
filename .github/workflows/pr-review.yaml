@@ -1,0 +1,83 @@
+name: PR Review
+run-name: LLM PR review for ${{ github.event.pull_request.title || github.ref_name }}
+
+on:
+  workflow_call:
+    inputs:
+      platform:
+        type: string
+        required: false
+        default: "github"
+        description: "Forge hosting the PR: 'github' or 'forgejo' (also covers Gitea)."
+      api-url:
+        type: string
+        required: false
+        default: ""
+        description: "Forge REST API base URL. Leave empty to use this forge's API; override for self-hosted instances (e.g. https://codeberg.org/api/v1)."
+      provider:
+        type: string
+        required: false
+        default: "anthropic"
+        description: "LLM provider: 'anthropic', 'openai', or 'openai-compatible'."
+      base-url:
+        type: string
+        required: false
+        default: ""
+        description: "API base URL override. Required for 'openai-compatible' (e.g. http://localhost:11434/v1)."
+      model:
+        type: string
+        required: false
+        default: "claude-opus-4-8"
+        description: "Model ID to use for the review."
+      max-tokens:
+        type: number
+        required: false
+        default: 16000
+        description: "Maximum output tokens for the review."
+      max-diff-bytes:
+        type: number
+        required: false
+        default: 300000
+        description: "Truncate the PR diff beyond this many bytes."
+      review-prompt:
+        type: string
+        required: false
+        default: ""
+        description: "Override the default review system prompt."
+      post-comment:
+        type: boolean
+        required: false
+        default: true
+        description: "Post the review as a sticky PR comment."
+      runs-on:
+        type: string
+        required: false
+        default: "ubuntu-latest"
+        description: "Runner label. Use a self-hosted label when the LLM endpoint is on a private network."
+    secrets:
+      llm-api-key:
+        required: false
+        description: "API key for the LLM provider. Required for cloud providers; optional for local endpoints."
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    name: Review pull request
+    runs-on: ${{ inputs.runs-on }}
+    steps:
+      - name: PR Review
+        uses: ctrl-research/ai-reviewer@main
+        with:
+          platform: ${{ inputs.platform }}
+          api-url: ${{ inputs.api-url || github.api_url }}
+          provider: ${{ inputs.provider }}
+          base-url: ${{ inputs.base-url }}
+          model: ${{ inputs.model }}
+          api-key: ${{ secrets.llm-api-key }}
+          max-tokens: ${{ inputs.max-tokens }}
+          max-diff-bytes: ${{ inputs.max-diff-bytes }}
+          review-prompt: ${{ inputs.review-prompt }}
+          post-comment: ${{ inputs.post-comment }}
