@@ -86,7 +86,7 @@
         "major"
       ],
       "addLabels": [
-        "major"
+        "update:major"
       ]
     },
     {
@@ -94,7 +94,7 @@
         "minor"
       ],
       "addLabels": [
-        "minor"
+        "update:minor"
       ]
     },
     {
@@ -102,7 +102,7 @@
         "patch"
       ],
       "addLabels": [
-        "patch"
+        "update:patch"
       ]
     }
   ],
