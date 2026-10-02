@@ -81,9 +81,12 @@ func New(provider, baseURL, apiKey string) (*Client, error) {
 	c := &Client{
 		Provider: provider,
 		APIKey:   apiKey,
-		// Non-streaming generations of up to ~16k tokens can take minutes.
-		HTTP:  httpx.NewClient(10 * time.Minute),
-		Retry: httpx.Retry{Attempts: 3, Delay: 5 * time.Second},
+		// Non-streaming generations can take many minutes with reasoning
+		// models and large max-tokens. A timeout means the generation itself
+		// is too slow, so it isn't retried; connection errors, 429s and 5xx
+		// still are.
+		HTTP:  httpx.NewClient(20 * time.Minute),
+		Retry: httpx.Retry{Attempts: 3, Delay: 5 * time.Second, NoTimeoutRetry: true},
 	}
 	switch provider {
 	case Anthropic:

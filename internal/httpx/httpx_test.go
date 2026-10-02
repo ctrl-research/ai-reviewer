@@ -114,3 +114,25 @@ func TestDoTruncatesAtMaxBody(t *testing.T) {
 		t.Errorf("exact fit: body=%q truncated=%v err=%v", body, truncated, err)
 	}
 }
+
+func TestDoNoTimeoutRetry(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		time.Sleep(200 * time.Millisecond)
+	}))
+	defer srv.Close()
+
+	for _, noRetry := range []bool{true, false} {
+		calls.Store(0)
+		_, _, err := Do(context.Background(), NewClient(50*time.Millisecond),
+			Retry{Attempts: 3, Delay: time.Millisecond, NoTimeoutRetry: noRetry}, get(srv.URL), 1024, http.StatusOK)
+		want := int32(3)
+		if noRetry {
+			want = 1
+		}
+		if err == nil || !isTimeout(err) || calls.Load() != want {
+			t.Errorf("NoTimeoutRetry=%v: err=%v calls=%d, want timeout after %d calls", noRetry, err, calls.Load(), want)
+		}
+	}
+}
