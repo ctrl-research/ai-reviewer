@@ -28,6 +28,66 @@ Supported LLM providers:
 
 No checkout step is needed — the action reads the diff via the forge REST API.
 
+## The review
+
+The model returns a structured review (JSON). `ego` turns it into one sticky comment, which it updates in place on every push:
+
+| Section | Contents |
+|---|---|
+| **Verdict** | ✅ Looks good / ⚠️ Needs changes / 🛑 Blocking, a risk level, and a one-line reason |
+| **Summary** | What the PR changes |
+| **Code review** | Findings ranked by severity (🛑 critical, 🔴 high, 🟠 medium, 🟡 low), each with file, line, problem and fix |
+| **Dependency changes** | Version bumps in the diff, with breaking changes taken from release notes in the PR description (e.g. Renovate's). Shown only when versions change |
+| **Security review** | The change's security impact, plus any security findings |
+| **Tests** | Whether the change is covered by tests, and the gaps |
+| **Questions for the author** | Things the model couldn't determine from the diff |
+| **Reviewer info** | Collapsed: provider, model, model version reported by the API, ego version, tokens, estimated cost |
+
+Example (concise mode):
+
+```markdown
+## ⚠️ Needs changes · Risk: **medium**
+
+The new cache is read and written from two goroutines without a lock.
+
+### Summary
+
+Adds an in-memory cache in front of the user lookup.
+
+### Code review
+
+- 🔴 **High** · Data race on cache map · `cache/cache.go:41`
+
+  `Get` and `Set` access the map from request goroutines with no synchronization.
+
+  **Fix:** Guard the map with a `sync.RWMutex`.
+
+<details><summary>1 medium/low finding</summary> … </details>
+
+### Security review
+
+No security impact: the cache holds only public profile fields.
+
+### Tests
+
+**Coverage:** ⚠️ Partial · Unit tests cover hits and misses.
+
+- Concurrent access test (`go test -race`)
+
+---
+<details><summary><sub>Reviewed by ego 0.1.0 · claude-opus-4-8 · 18.2k in / 1.1k out · ≈ $0.12</sub></summary> … </details>
+```
+
+**Tuning it**
+- `concise: true` (default) asks for shorter text and folds medium/low findings and questions into collapsed sections. `concise: false` asks for a thorough review with everything expanded.
+- `reviewer-info: false` drops the reviewer-info block.
+- `extra-prompt` appends your own guidance to the built-in prompt and keeps the structured format, e.g. `extra-prompt: "We use sqlc; flag hand-written SQL. Public API changes need a CHANGELOG entry."`
+- `review-prompt` replaces the built-in prompt entirely. The model's output is then posted as-is (markdown), without the sections above, and the `review-json`/`verdict` outputs are empty. `extra-prompt` is still appended, and reviewer info is still added.
+
+**Structured output.** On Anthropic models that support it (Fable 5/5.1, Opus 5.5/5/4.8, Sonnet 5.5/5, Haiku 4.5), `ego` enforces the JSON format natively. Other models get the schema in the prompt, and `ego` extracts the JSON from the response, including from code fences or surrounding prose. If no valid review is found, it posts the model's raw output under a warning instead of failing.
+
+**Cost** is an estimate. Without `input-price`/`output-price`, `ego` uses built-in Anthropic list prices (ignoring caching and batch discounts). For other providers it shows token counts only, since a guessed price would be worse than none.
+
 ## Usage — reusable workflow
 
 ```yaml
@@ -159,7 +219,12 @@ With `--post-comment=false` and no `GITHUB_OUTPUT` set, the review is printed to
 | `pr-number` | from event | PR number when not running on a `pull_request` event |
 | `max-tokens` | `16000` | Max output tokens |
 | `max-diff-bytes` | `300000` | Diff truncation limit |
-| `review-prompt` | built-in | Override the review system prompt |
+| `review-prompt` | built-in | Replace the built-in prompt; output is posted as-is (see [The review](#the-review)) |
+| `extra-prompt` | — | Extra instructions appended to the reviewer prompt |
+| `concise` | `true` | Prefer concise reviews; fold medium/low findings and questions |
+| `reviewer-info` | `true` | Add the collapsed reviewer-info block |
+| `input-price` | built-in / — | USD per million input tokens for the cost estimate (set with `output-price`) |
+| `output-price` | built-in / — | USD per million output tokens for the cost estimate (set with `input-price`) |
 | `extra-body` | — | JSON object merged into the LLM request body; `null` removes a key (see Notes) |
 | `post-comment` | `true` | Post/update the sticky PR comment |
 
@@ -167,7 +232,17 @@ With `--post-comment=false` and no `GITHUB_OUTPUT` set, the review is printed to
 
 | Output | Description |
 |---|---|
-| `review` | The generated review body (markdown) |
+| `review` | The rendered review (markdown), as posted without the sticky marker |
+| `review-json` | The structured review as JSON (empty with a custom `review-prompt` or unparseable output) |
+| `verdict` | `approve`, `needs_changes` or `blocking` (empty when `review-json` is) |
+
+For example, to fail the job on a blocking review:
+
+```yaml
+      - name: Fail on blocking review
+        if: steps.review.outputs.verdict == 'blocking'
+        run: exit 1
+```
 
 ## Notes
 
@@ -175,6 +250,7 @@ With `--post-comment=false` and no `GITHUB_OUTPUT` set, the review is printed to
 - Failed requests to the forge (reads only) and the LLM are retried twice on connection errors and HTTP 408/409/429/5xx, honoring `Retry-After`.
 - If the model stops at `max-tokens`, the review is still posted and a warning is logged. If the model declines the request (Anthropic `refusal` stop reason or OpenAI `refusal`), the step fails.
 - The sticky comment is identified by an HTML marker (`<!-- pr-review-action -->`); re-runs update it instead of stacking new comments.
+- Model-written text has `@mentions` neutralized (a zero-width space after the `@`), so a prompt-injected diff can't make the bot ping users or teams. Comments are capped just under GitHub's 65,536-character limit.
 - Diffs larger than `max-diff-bytes` are truncated with a notice appended, so the model knows the diff is partial.
 - `extra-body` passes provider-specific parameters. It can't set `model`, `messages` or `system`; use the matching inputs. Examples:
   - MiniMax: `'{"reasoning_split": true}'` returns reasoning in a separate `reasoning_content` field instead of inline `<think>` tags.

@@ -10,6 +10,7 @@ import (
 	"github.com/ctrl-research/ego/internal/forge"
 	"github.com/ctrl-research/ego/internal/gha"
 	"github.com/ctrl-research/ego/internal/llm"
+	"github.com/ctrl-research/ego/internal/report"
 )
 
 func env(vars map[string]string) func(string) string {
@@ -36,7 +37,7 @@ func TestLoadDefaults(t *testing.T) {
 	}
 	if s.Platform != forge.GitHub || s.APIURL != "https://api.github.com" || s.Provider != "anthropic" ||
 		s.Model != "claude-opus-4-8" || s.MaxTokens != 16000 || s.MaxDiffBytes != 300000 || !s.PostComment ||
-		s.Repo != "owner/repo" || s.PRNumber != 7 {
+		s.Repo != "owner/repo" || s.PRNumber != 7 || !s.ReviewerInfo || !s.Concise || s.Price != nil {
 		t.Errorf("settings = %+v", s)
 	}
 }
@@ -69,6 +70,10 @@ func TestValidate(t *testing.T) {
 		{"bad provider", "EGO_PROVIDER", "gemini", "unknown provider"},
 		{"compatible needs base", "EGO_PROVIDER", "openai-compatible", "'base-url' is required"},
 		{"post comment", "EGO_POST_COMMENT", "yes", "'post-comment' must be 'true' or 'false'"},
+		{"reviewer info", "EGO_REVIEWER_INFO", "on", "'reviewer-info' must be 'true' or 'false'"},
+		{"concise", "EGO_CONCISE", "maybe", "'concise' must be 'true' or 'false'"},
+		{"price alone", "EGO_INPUT_PRICE", "3", "'output-price' must be a non-negative number"},
+		{"price negative", "EGO_INPUT_PRICE", "-1", "'input-price' must be a non-negative number"},
 		{"extra body not object", "EGO_EXTRA_BODY", "[1]", "'extra-body' must be a JSON object"},
 		{"extra body invalid", "EGO_EXTRA_BODY", "{nope", "'extra-body' must be a JSON object"},
 		{"extra body null", "EGO_EXTRA_BODY", "null", "'extra-body' must be a JSON object"},
@@ -168,25 +173,36 @@ func (f *fakeLLM) Review(_ context.Context, req llm.Request) (*llm.Result, error
 	return &f.res, nil
 }
 
-func TestRun(t *testing.T) {
-	s := &Settings{PRNumber: 7, MaxDiffBytes: 2, MaxTokens: 10, Provider: "anthropic", Model: "m", PostComment: true}
+const structuredReview = `{"verdict":"needs_changes","risk":"medium","verdict_reason":"One bug.","summary":"Adds x.","findings":[{"category":"code","severity":"high","file":"x.go","line":3,"title":"Nil deref","detail":"d","suggestion":"s","uncertain":false}],"dependency_changes":[],"security_summary":"None.","tests":{"coverage":"missing","notes":"No tests.","gaps":["test x"]},"questions":[]}`
+
+func runSettings() *Settings {
+	return &Settings{PRNumber: 7, MaxDiffBytes: 2, MaxTokens: 10, Provider: "anthropic", Model: "claude-opus-4-8",
+		PostComment: true, ReviewerInfo: true, Concise: true, EgoVersion: "1.2.3"}
+}
+
+func TestRunStructured(t *testing.T) {
+	s := runSettings()
 	f := &fakeForge{diffTruncated: true}
-	r := &fakeLLM{res: llm.Result{Text: "review text\n", Truncated: true}}
+	r := &fakeLLM{res: llm.Result{Text: structuredReview, Truncated: true, Model: "claude-opus-4-8", InputTokens: 1000, OutputTokens: 200}}
 	var logs bytes.Buffer
 
-	text, err := Run(context.Background(), s, f, r, &gha.Logger{W: &logs, Actions: true})
+	out, err := Run(context.Background(), s, f, r, &gha.Logger{W: &logs, Actions: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if text != "review text\n" {
-		t.Errorf("text = %q", text)
+	if out.Verdict != "needs_changes" || !strings.Contains(out.JSON, `"title":"Nil deref"`) {
+		t.Errorf("out = %+v", out)
 	}
-	if r.got.System != DefaultSystemPrompt || !strings.Contains(r.got.Prompt, "[diff truncated at 2 bytes]") {
-		t.Errorf("request = %+v", r.got)
+	if string(r.got.Schema) == "" || !strings.Contains(r.got.System, "Response JSON Schema") || !strings.Contains(r.got.System, "Be concise") {
+		t.Errorf("request missing schema or concise prompt: %q", r.got.System)
 	}
-	want := "<!-- pr-review-action -->\n\nreview text\n\n---\n_Reviewed by `ego` (anthropic / m)_\n"
-	if f.posted != want {
-		t.Errorf("posted %q\nwant   %q", f.posted, want)
+	if !strings.Contains(r.got.Prompt, "[diff truncated at 2 bytes]") {
+		t.Errorf("prompt = %q", r.got.Prompt)
+	}
+	for _, w := range []string{"<!-- pr-review-action -->\n\n## ⚠️ Needs changes", "Nil deref", "`x.go:3`", "Reviewed by ego 1.2.3", "≈ $0.0100"} {
+		if !strings.Contains(f.posted, w) {
+			t.Errorf("comment missing %q:\n%s", w, f.posted)
+		}
 	}
 	for _, w := range []string{"::warning::PR diff is larger than 2 bytes", "::warning::Review stopped at max-tokens (10)", "Created new review comment"} {
 		if !strings.Contains(logs.String(), w) {
@@ -195,15 +211,85 @@ func TestRun(t *testing.T) {
 	}
 }
 
-func TestRunCustomPromptNoComment(t *testing.T) {
-	s := &Settings{PRNumber: 7, MaxDiffBytes: 100, ReviewPrompt: "custom", PostComment: false}
+func TestRunFallsBackToRawOutput(t *testing.T) {
+	s := runSettings()
 	f := &fakeForge{}
-	r := &fakeLLM{res: llm.Result{Text: "ok"}}
-	if _, err := Run(context.Background(), s, f, r, &gha.Logger{W: &bytes.Buffer{}}); err != nil {
+	r := &fakeLLM{res: llm.Result{Text: "Looks fine to me."}}
+	var logs bytes.Buffer
+	out, err := Run(context.Background(), s, f, r, &gha.Logger{W: &logs, Actions: true})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if r.got.System != "custom" || f.posted != "" {
-		t.Errorf("system=%q posted=%q", r.got.System, f.posted)
+	if out.Verdict != "" || out.JSON != "" {
+		t.Errorf("out = %+v", out)
+	}
+	if !strings.Contains(f.posted, "[!WARNING]") || !strings.Contains(f.posted, "Looks fine to me.") {
+		t.Errorf("posted = %q", f.posted)
+	}
+	if !strings.Contains(logs.String(), "::warning::Couldn't parse a structured review") {
+		t.Errorf("logs = %s", logs.String())
+	}
+}
+
+func TestRunCustomPromptNoComment(t *testing.T) {
+	s := runSettings()
+	s.ReviewPrompt, s.ExtraPrompt, s.PostComment, s.ReviewerInfo = "custom", "also check docs", false, false
+	f := &fakeForge{}
+	r := &fakeLLM{res: llm.Result{Text: "ok"}}
+	out, err := Run(context.Background(), s, f, r, &gha.Logger{W: &bytes.Buffer{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.got.System != "custom\n\nAdditional instructions:\nalso check docs\n" || r.got.Schema != nil {
+		t.Errorf("system = %q schema = %s", r.got.System, r.got.Schema)
+	}
+	if f.posted != "" || out.Markdown != "ok\n" {
+		t.Errorf("posted = %q markdown = %q", f.posted, out.Markdown)
+	}
+}
+
+func TestSystemPromptOptions(t *testing.T) {
+	s := runSettings()
+	s.Concise, s.ExtraPrompt = false, "We use sqlc."
+	p, structured := SystemPrompt(s)
+	if !structured || !strings.Contains(p, "Be thorough") || strings.Contains(p, "Be concise") {
+		t.Errorf("detailed prompt wrong: %q", p)
+	}
+	if !strings.Contains(p, "repository maintainers") || !strings.Contains(p, "We use sqlc.") {
+		t.Error("extra prompt missing")
+	}
+	if i, j := strings.Index(p, "We use sqlc."), strings.Index(p, "Response JSON Schema"); i > j {
+		t.Error("extra prompt should come before the schema")
+	}
+}
+
+func TestReviewerInfoCost(t *testing.T) {
+	s := runSettings()
+	res := &llm.Result{Model: "claude-opus-4-8-20260801", InputTokens: 1_000_000, OutputTokens: 0}
+	if info := reviewerInfo(s, res); info.Cost == nil || *info.Cost != 5 {
+		t.Errorf("built-in price for dated snapshot: %+v", info.Cost)
+	}
+	s.Model, res.Model = "MiniMax-M3", "MiniMax-M3"
+	if info := reviewerInfo(s, res); info.Cost != nil {
+		t.Errorf("unknown model should have no cost, got %v", *info.Cost)
+	}
+	s.Price = &report.Price{Input: 0.3, Output: 1.2}
+	res.OutputTokens = 1_000_000
+	if info := reviewerInfo(s, res); info.Cost == nil || *info.Cost != 1.5 {
+		t.Errorf("caller price: %+v", info.Cost)
+	}
+	if info := reviewerInfo(s, &llm.Result{}); info.Cost != nil {
+		t.Error("no usage should mean no cost")
+	}
+}
+
+func TestCommentBodyCapsLength(t *testing.T) {
+	body := CommentBody(strings.Repeat("é", 70000))
+	if n := len([]rune(body)); n > 65536 {
+		t.Errorf("comment is %d runes", n)
+	}
+	if !strings.HasPrefix(body, Marker) || !strings.Contains(body, "truncated to fit") {
+		t.Error("marker or truncation note missing")
 	}
 }
 

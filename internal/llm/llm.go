@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -29,9 +30,13 @@ type Request struct {
 	System    string
 	Prompt    string
 	MaxTokens int
-	// Extra is merged into the top level of the JSON request body for
-	// provider-specific parameters. A JSON null value removes that key.
+	// Extra is merged into the JSON request body for provider-specific
+	// parameters. Objects merge key by key; a JSON null value removes a key.
 	Extra map[string]json.RawMessage
+	// Schema, when set, is a JSON Schema the response should follow. It is
+	// enforced natively on Anthropic models that support structured outputs
+	// (see StructuredOutputSupported); elsewhere the prompt carries it.
+	Schema json.RawMessage
 }
 
 // Result is the generated review text.
@@ -39,6 +44,13 @@ type Result struct {
 	Text string
 	// Truncated reports that generation stopped at MaxTokens.
 	Truncated bool
+	// Model is the model ID the API reports serving (e.g. a dated
+	// snapshot); empty if the response doesn't say.
+	Model string
+	// InputTokens and OutputTokens are the billed token counts, when the
+	// response reports usage.
+	InputTokens  int
+	OutputTokens int
 }
 
 // ErrEmpty is returned when the provider responds without any review text.
@@ -87,12 +99,16 @@ func (c *Client) Review(ctx context.Context, req Request) (*Result, error) {
 	var payload any
 	headers := map[string]string{"Content-Type": "application/json"}
 	if c.Provider == Anthropic {
-		payload = anthropicRequest{
+		ar := anthropicRequest{
 			Model:     req.Model,
 			MaxTokens: req.MaxTokens,
 			System:    req.System,
 			Messages:  []message{{Role: "user", Content: req.Prompt}},
 		}
+		if req.Schema != nil && StructuredOutputSupported(req.Model) {
+			ar.OutputConfig = &outputConfig{Format: &outputFormat{Type: "json_schema", Schema: req.Schema}}
+		}
+		payload = ar
 		headers["x-api-key"] = c.APIKey
 		headers["anthropic-version"] = "2023-06-01"
 	} else {
@@ -133,7 +149,7 @@ func (c *Client) Review(ctx context.Context, req Request) (*Result, error) {
 	return parseOpenAI(resp)
 }
 
-// withExtra marshals payload and merges extra into its top-level object.
+// withExtra marshals payload and merges extra into it.
 func withExtra(payload any, extra map[string]json.RawMessage) ([]byte, error) {
 	body, err := json.Marshal(payload)
 	if err != nil || len(extra) == 0 {
@@ -143,14 +159,62 @@ func withExtra(payload any, extra map[string]json.RawMessage) ([]byte, error) {
 	if err := json.Unmarshal(body, &fields); err != nil {
 		return nil, err
 	}
+	if err := merge(fields, extra); err != nil {
+		return nil, err
+	}
+	return json.Marshal(fields)
+}
+
+// merge applies extra onto fields: null deletes a key, two objects merge
+// recursively, and anything else replaces the existing value. Merging
+// objects lets e.g. extra-body set output_config.effort without dropping
+// the output_config.format ego sets.
+func merge(fields, extra map[string]json.RawMessage) error {
 	for k, v := range extra {
 		if string(v) == "null" {
 			delete(fields, k)
-		} else {
-			fields[k] = v
+			continue
 		}
+		var dst, src map[string]json.RawMessage
+		if json.Unmarshal(fields[k], &dst) == nil && dst != nil && json.Unmarshal(v, &src) == nil && src != nil {
+			if err := merge(dst, src); err != nil {
+				return err
+			}
+			merged, err := json.Marshal(dst)
+			if err != nil {
+				return err
+			}
+			fields[k] = merged
+			continue
+		}
+		fields[k] = v
 	}
-	return json.Marshal(fields)
+	return nil
+}
+
+// structuredOutputModels lists Anthropic models that accept
+// output_config.format (structured outputs). Opus 4.7/4.6 and Sonnet 4.6 do
+// not, and reject the parameter.
+var structuredOutputModels = map[string]bool{
+	"claude-fable-5-1": true, "claude-mythos-5-1": true,
+	"claude-fable-5": true, "claude-mythos-5": true,
+	"claude-opus-5-5": true, "claude-opus-5": true, "claude-opus-4-8": true,
+	"claude-sonnet-5-5": true, "claude-sonnet-5": true,
+	"claude-haiku-4-5": true,
+	"claude-opus-4-5":  true, "claude-opus-4-1": true,
+}
+
+var dateSuffix = regexp.MustCompile(`-\d{8}$`)
+
+// StructuredOutputSupported reports whether model accepts Anthropic
+// structured outputs. Dated snapshots and Bedrock/Vertex spellings match
+// their base model.
+func StructuredOutputSupported(model string) bool {
+	m := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(model)), "anthropic.")
+	if i := strings.IndexByte(m, '@'); i >= 0 {
+		m = m[:i]
+	}
+	return structuredOutputModels[dateSuffix.ReplaceAllString(m, "")]
 }
 
 type message struct {
@@ -159,10 +223,20 @@ type message struct {
 }
 
 type anthropicRequest struct {
-	Model     string    `json:"model"`
-	MaxTokens int       `json:"max_tokens"`
-	System    string    `json:"system"`
-	Messages  []message `json:"messages"`
+	Model        string        `json:"model"`
+	MaxTokens    int           `json:"max_tokens"`
+	System       string        `json:"system"`
+	Messages     []message     `json:"messages"`
+	OutputConfig *outputConfig `json:"output_config,omitempty"`
+}
+
+type outputConfig struct {
+	Format *outputFormat `json:"format,omitempty"`
+}
+
+type outputFormat struct {
+	Type   string          `json:"type"`
+	Schema json.RawMessage `json:"schema"`
 }
 
 type anthropicResponse struct {
@@ -170,7 +244,14 @@ type anthropicResponse struct {
 		Type string `json:"type"`
 		Text string `json:"text"`
 	} `json:"content"`
-	StopReason  string `json:"stop_reason"`
+	Model      string `json:"model"`
+	StopReason string `json:"stop_reason"`
+	Usage      struct {
+		InputTokens              int `json:"input_tokens"`
+		CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+		CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+		OutputTokens             int `json:"output_tokens"`
+	} `json:"usage"`
 	StopDetails *struct {
 		Category    *string `json:"category"`
 		Explanation string  `json:"explanation"`
@@ -204,7 +285,14 @@ func parseAnthropic(body []byte) (*Result, error) {
 	if strings.TrimSpace(text) == "" {
 		return nil, ErrEmpty
 	}
-	return &Result{Text: text, Truncated: r.StopReason == "max_tokens"}, nil
+	u := r.Usage
+	return &Result{
+		Text:         text,
+		Truncated:    r.StopReason == "max_tokens",
+		Model:        r.Model,
+		InputTokens:  u.InputTokens + u.CacheCreationInputTokens + u.CacheReadInputTokens,
+		OutputTokens: u.OutputTokens,
+	}, nil
 }
 
 type openAIRequest struct {
@@ -214,6 +302,11 @@ type openAIRequest struct {
 }
 
 type openAIResponse struct {
+	Model string `json:"model"`
+	Usage struct {
+		PromptTokens     int `json:"prompt_tokens"`
+		CompletionTokens int `json:"completion_tokens"`
+	} `json:"usage"`
 	Choices []struct {
 		Message struct {
 			Content *string `json:"content"`
@@ -246,7 +339,13 @@ func parseOpenAI(body []byte) (*Result, error) {
 	if strings.TrimSpace(text) == "" {
 		return nil, ErrEmpty
 	}
-	return &Result{Text: text, Truncated: truncated}, nil
+	return &Result{
+		Text:         text,
+		Truncated:    truncated,
+		Model:        r.Model,
+		InputTokens:  r.Usage.PromptTokens,
+		OutputTokens: r.Usage.CompletionTokens,
+	}, nil
 }
 
 // stripThinking removes a leading <think>…</think> block from s. Some
