@@ -43,7 +43,27 @@ inputs:
     required: false
     default: "300000"
   review-prompt:
-    description: "Override the default system prompt used for the review."
+    description: "Replace the built-in reviewer prompt entirely. The model's output is then posted as-is (markdown), without the structured sections; reviewer-info is still added. To keep the structured review and add your own guidance, use extra-prompt instead."
+    required: false
+    default: ""
+  extra-prompt:
+    description: "Extra instructions appended to the reviewer prompt, e.g. 'We use sqlc; flag raw SQL.' They take priority over the built-in guidance but can't change the response format."
+    required: false
+    default: ""
+  concise:
+    description: "Prefer concise reviews ('true'/'false'). Concise mode asks for shorter text and folds medium/low findings and questions into collapsed sections."
+    required: false
+    default: "true"
+  reviewer-info:
+    description: "Add a collapsed reviewer-info block (provider, model, model version, ego version, tokens, estimated cost) to the comment ('true'/'false')."
+    required: false
+    default: "true"
+  input-price:
+    description: "USD per million input tokens, for the cost estimate. Set together with output-price. Without them, ego uses built-in Anthropic list prices, or shows token counts only."
+    required: false
+    default: ""
+  output-price:
+    description: "USD per million output tokens, for the cost estimate. Set together with input-price."
     required: false
     default: ""
   extra-body:
@@ -57,8 +77,14 @@ inputs:
 
 outputs:
   review:
-    description: "The generated review body (markdown)."
+    description: "The rendered review (markdown), as posted without the sticky marker."
     value: ${{ steps.review.outputs.review }}
+  review-json:
+    description: "The structured review as JSON. Empty with a custom review-prompt, or if the model's response couldn't be parsed."
+    value: ${{ steps.review.outputs.review-json }}
+  verdict:
+    description: "'approve', 'needs_changes' or 'blocking'. Empty when review-json is empty. Use it to gate merges, e.g. fail the job on 'blocking'."
+    value: ${{ steps.review.outputs.verdict }}
 
 runs:
   using: "composite"
@@ -132,7 +158,13 @@ runs:
       env:
         BIN: ${{ steps.install.outputs.path }}
         CGO_ENABLED: "0"
-      run: go build -trimpath -ldflags "-X main.version=source" -o "$BIN" ./cmd/ego
+        # The ref the action was used at (e.g. main), or the commit for
+        # uses: ./ — shown as the ego version in reviewer info.
+        SOURCE_REF: ${{ github.action_ref || github.sha }}
+      run: |
+        ref="${SOURCE_REF:0:12}"
+        [[ "$ref" =~ ^[A-Za-z0-9._/-]+$ ]] || ref=unknown
+        go build -trimpath -ldflags "-X main.version=source+${ref}" -o "$BIN" ./cmd/ego
 
     - name: Review pull request
       id: review
@@ -151,6 +183,11 @@ runs:
         EGO_MAX_TOKENS: ${{ inputs.max-tokens }}
         EGO_MAX_DIFF_BYTES: ${{ inputs.max-diff-bytes }}
         EGO_REVIEW_PROMPT: ${{ inputs.review-prompt }}
+        EGO_EXTRA_PROMPT: ${{ inputs.extra-prompt }}
+        EGO_CONCISE: ${{ inputs.concise }}
+        EGO_REVIEWER_INFO: ${{ inputs.reviewer-info }}
+        EGO_INPUT_PRICE: ${{ inputs.input-price }}
+        EGO_OUTPUT_PRICE: ${{ inputs.output-price }}
         EGO_EXTRA_BODY: ${{ inputs.extra-body }}
         EGO_POST_COMMENT: ${{ inputs.post-comment }}
       run: '"$EGO_BIN"'

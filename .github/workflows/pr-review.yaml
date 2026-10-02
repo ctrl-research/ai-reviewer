@@ -43,7 +43,32 @@ on:
         type: string
         required: false
         default: ""
-        description: "Override the default review system prompt."
+        description: "Replace the built-in reviewer prompt entirely; the output is posted as-is."
+      extra-prompt:
+        type: string
+        required: false
+        default: ""
+        description: "Extra instructions appended to the reviewer prompt."
+      concise:
+        type: boolean
+        required: false
+        default: true
+        description: "Prefer concise reviews."
+      reviewer-info:
+        type: boolean
+        required: false
+        default: true
+        description: "Add the collapsed reviewer-info block (provider, model, versions, tokens, cost)."
+      input-price:
+        type: string
+        required: false
+        default: ""
+        description: "USD per million input tokens, for the cost estimate (set with output-price)."
+      output-price:
+        type: string
+        required: false
+        default: ""
+        description: "USD per million output tokens, for the cost estimate (set with input-price)."
       extra-body:
         type: string
         required: false
@@ -85,5 +110,10 @@ jobs:
           max-tokens: ${{ inputs.max-tokens }}
           max-diff-bytes: ${{ inputs.max-diff-bytes }}
           review-prompt: ${{ inputs.review-prompt }}
+          extra-prompt: ${{ inputs.extra-prompt }}
+          concise: ${{ inputs.concise }}
+          reviewer-info: ${{ inputs.reviewer-info }}
+          input-price: ${{ inputs.input-price }}
+          output-price: ${{ inputs.output-price }}
           extra-body: ${{ inputs.extra-body }}
           post-comment: ${{ inputs.post-comment }}

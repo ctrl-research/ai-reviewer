@@ -58,7 +58,8 @@ func run() int {
 	}
 	f := forge.NewClient(s.Platform, s.APIURL, s.Repo, s.Token)
 
-	text, err := review.Run(ctx, s, f, reviewer, log)
+	s.EgoVersion = version
+	out, err := review.Run(ctx, s, f, reviewer, log)
 	if err != nil {
 		log.Errorf("%v", err)
 		var serr *httpx.StatusError
@@ -68,13 +69,15 @@ func run() int {
 		return 1
 	}
 
-	if out := os.Getenv("GITHUB_OUTPUT"); out != "" {
-		if err := gha.SetOutput(out, "review", text); err != nil {
-			log.Errorf("%v", err)
-			return 1
+	if path := os.Getenv("GITHUB_OUTPUT"); path != "" {
+		for name, value := range map[string]string{"review": out.Markdown, "review-json": out.JSON, "verdict": out.Verdict} {
+			if err := gha.SetOutput(path, name, value); err != nil {
+				log.Errorf("%v", err)
+				return 1
+			}
 		}
 	} else {
-		fmt.Println(text)
+		fmt.Println(out.Markdown)
 	}
 	return 0
 }

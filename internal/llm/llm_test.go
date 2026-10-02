@@ -213,3 +213,57 @@ func TestExtraBodyMergesAndRemoves(t *testing.T) {
 		t.Errorf("model = %v", got.body["model"])
 	}
 }
+
+func TestAnthropicStructuredOutputAndUsage(t *testing.T) {
+	schema := json.RawMessage(`{"type":"object"}`)
+	for model, wantFormat := range map[string]bool{
+		"claude-opus-4-8":           true,
+		"claude-haiku-4-5-20251001": true,
+		"claude-opus-4-7":           false, // rejects output_config.format
+		"claude-sonnet-4-6":         false,
+	} {
+		t.Run(model, func(t *testing.T) {
+			got, url := serve(t, 200, `{"model":"`+model+`-20260801","content":[{"type":"text","text":"{}"}],"stop_reason":"end_turn",
+				"usage":{"input_tokens":100,"cache_creation_input_tokens":20,"cache_read_input_tokens":5,"output_tokens":42}}`)
+			r := req
+			r.Model, r.Schema = model, schema
+			r.Extra = map[string]json.RawMessage{"output_config": json.RawMessage(`{"effort":"high"}`)}
+			res, err := newTestClient(t, Anthropic, url, "k").Review(context.Background(), r)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if res.Model != model+"-20260801" || res.InputTokens != 125 || res.OutputTokens != 42 {
+				t.Errorf("result = %+v", res)
+			}
+			oc, _ := got.body["output_config"].(map[string]any)
+			if oc["effort"] != "high" {
+				t.Errorf("extra-body effort lost: %v", got.body["output_config"])
+			}
+			_, hasFormat := oc["format"]
+			if hasFormat != wantFormat {
+				t.Errorf("format sent = %v, want %v (%v)", hasFormat, wantFormat, oc)
+			}
+		})
+	}
+}
+
+func TestOpenAIUsage(t *testing.T) {
+	_, url := serve(t, 200, `{"model":"gpt-x-2026","choices":[{"message":{"content":"ok"}}],"usage":{"prompt_tokens":7,"completion_tokens":3}}`)
+	res, err := newTestClient(t, OpenAI, url, "k").Review(context.Background(), Request{Model: "gpt-x", Schema: json.RawMessage(`{}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Model != "gpt-x-2026" || res.InputTokens != 7 || res.OutputTokens != 3 {
+		t.Errorf("result = %+v", res)
+	}
+}
+
+func TestMergeNullRemovesNestedKey(t *testing.T) {
+	fields := map[string]json.RawMessage{"a": json.RawMessage(`{"x":1,"y":2}`), "b": json.RawMessage(`1`)}
+	if err := merge(fields, map[string]json.RawMessage{"a": json.RawMessage(`{"y":null,"z":3}`), "b": json.RawMessage(`{"q":1}`)}); err != nil {
+		t.Fatal(err)
+	}
+	if string(fields["a"]) != `{"x":1,"z":3}` || string(fields["b"]) != `{"q":1}` {
+		t.Errorf("fields = %s %s", fields["a"], fields["b"])
+	}
+}

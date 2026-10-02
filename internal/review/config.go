@@ -5,12 +5,14 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"math"
 	"regexp"
 	"strconv"
 	"strings"
 
 	"github.com/ctrl-research/ego/internal/forge"
 	"github.com/ctrl-research/ego/internal/llm"
+	"github.com/ctrl-research/ego/internal/report"
 )
 
 // Config is the full set of review settings. In the action every field comes
@@ -29,8 +31,13 @@ type Config struct {
 	MaxTokens    string
 	MaxDiffBytes string
 	ReviewPrompt string
+	ExtraPrompt  string
 	ExtraBody    string
 	PostComment  string
+	ReviewerInfo string
+	Concise      string
+	InputPrice   string
+	OutputPrice  string
 }
 
 // Load builds a Config from the environment (via getenv) and command-line
@@ -49,6 +56,7 @@ func Load(getenv func(string) string, args []string) (*Config, error) {
 		// Free text: an empty value means "use the built-in prompt", so it is
 		// read verbatim rather than through the fallback helper.
 		ReviewPrompt: getenv("EGO_REVIEW_PROMPT"),
+		ExtraPrompt:  getenv("EGO_EXTRA_PROMPT"),
 	}
 
 	fs := flag.NewFlagSet("ego", flag.ContinueOnError)
@@ -63,6 +71,10 @@ func Load(getenv func(string) string, args []string) (*Config, error) {
 	fs.StringVar(&c.MaxDiffBytes, "max-diff-bytes", env("MAX_DIFF_BYTES", "300000"), "truncate the diff beyond this many bytes")
 	fs.StringVar(&c.ExtraBody, "extra-body", env("EXTRA_BODY", ""), "JSON object merged into the LLM request body (null removes a key)")
 	fs.StringVar(&c.PostComment, "post-comment", env("POST_COMMENT", "true"), "post the review as a sticky PR comment")
+	fs.StringVar(&c.ReviewerInfo, "reviewer-info", env("REVIEWER_INFO", "true"), "include provider, model, version and token/cost info")
+	fs.StringVar(&c.Concise, "concise", env("CONCISE", "true"), "prefer short reviews; fold medium/low findings")
+	fs.StringVar(&c.InputPrice, "input-price", env("INPUT_PRICE", ""), "USD per million input tokens, for the cost estimate")
+	fs.StringVar(&c.OutputPrice, "output-price", env("OUTPUT_PRICE", ""), "USD per million output tokens, for the cost estimate")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: ego [flags]\n\nSecrets are read from the environment only:\n"+
 			"  EGO_TOKEN    forge token (falls back to GITHUB_TOKEN)\n"+
@@ -92,8 +104,15 @@ type Settings struct {
 	MaxTokens    int
 	MaxDiffBytes int64
 	ReviewPrompt string
+	ExtraPrompt  string
 	ExtraBody    map[string]json.RawMessage
 	PostComment  bool
+	ReviewerInfo bool
+	Concise      bool
+	// Price overrides the built-in price table when both prices are set.
+	Price *report.Price
+	// EgoVersion is filled in by the caller (the binary's build version).
+	EgoVersion string
 }
 
 var repoPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
@@ -111,6 +130,7 @@ func (c *Config) Validate() (*Settings, error) {
 		Model:        c.Model,
 		APIKey:       c.APIKey,
 		ReviewPrompt: c.ReviewPrompt,
+		ExtraPrompt:  c.ExtraPrompt,
 	}
 
 	switch p := forge.Platform(c.Platform); p {
@@ -163,8 +183,29 @@ func (c *Config) Validate() (*Settings, error) {
 		return nil, err
 	}
 
-	if s.PostComment, err = strconv.ParseBool(c.PostComment); err != nil {
-		return nil, fmt.Errorf("'post-comment' must be 'true' or 'false' (got '%s')", c.PostComment)
+	for _, b := range []struct {
+		name, v string
+		dst     *bool
+	}{
+		{"post-comment", c.PostComment, &s.PostComment},
+		{"reviewer-info", c.ReviewerInfo, &s.ReviewerInfo},
+		{"concise", c.Concise, &s.Concise},
+	} {
+		if *b.dst, err = strconv.ParseBool(b.v); err != nil {
+			return nil, fmt.Errorf("'%s' must be 'true' or 'false' (got '%s')", b.name, b.v)
+		}
+	}
+
+	if c.InputPrice != "" || c.OutputPrice != "" {
+		in, err := price("input-price", c.InputPrice)
+		if err != nil {
+			return nil, err
+		}
+		out, err := price("output-price", c.OutputPrice)
+		if err != nil {
+			return nil, err
+		}
+		s.Price = &report.Price{Input: in, Output: out}
 	}
 	return s, nil
 }
@@ -186,6 +227,16 @@ func parseExtraBody(v string) (map[string]json.RawMessage, error) {
 		}
 	}
 	return extra, nil
+}
+
+// price parses a USD-per-million-tokens price. Both prices must be set
+// together.
+func price(name, v string) (float64, error) {
+	p, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
+	if err != nil || p < 0 || math.IsInf(p, 0) || math.IsNaN(p) {
+		return 0, fmt.Errorf("'%s' must be a non-negative number of USD per million tokens, set together with the other price (got '%s')", name, v)
+	}
+	return p, nil
 }
 
 func positiveInt(name, v string) (int, error) {

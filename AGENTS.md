@@ -38,7 +38,8 @@ The review logic is a dependency-free Go program (`cmd/ego`, `internal/...`); `a
 │   ├── gha/                  # Workflow commands and $GITHUB_OUTPUT
 │   ├── httpx/                # No-redirect client, retries, bounded bodies
 │   ├── llm/                  # Anthropic Messages / OpenAI Chat Completions
-│   └── review/               # Config validation, prompts, pipeline
+│   ├── report/               # Review JSON schema, lenient parser, markdown renderer, price table
+│   └── review/               # Config validation, prompt (prompt.go), pipeline
 ├── go.mod
 ├── AGENTS.md                 # Operational expectations for humans and AI agents
 ├── CONTRIBUTING.md
@@ -65,12 +66,14 @@ Note: the template's YAML check only `echo`s on invalid YAML — it does not fai
 ## Architecture
 
 - `action.yaml` — composite action wrapper. For a bare `X.Y.Z` `github.action_ref` it downloads `ego_<os>_<arch>[.exe]` from that GitHub release and checks it against `checksums.txt`; for any other ref (or a missing asset) it runs `actions/setup-go` and builds from `github.action_path`. It then runs the binary with every input mapped to an `EGO_*` env var.
-- The binary: validate config (`internal/review/config.go`) → fetch PR metadata and diff via the forge REST API (no checkout needed) → build prompts → call the LLM → post a sticky PR comment (identified by the `<!-- pr-review-action -->` marker, updated in place on re-runs) → write the `review` output. Keep the marker stable so existing comments keep being updated.
+- The binary: validate config (`internal/review/config.go`) → fetch PR metadata and diff via the forge REST API (no checkout needed) → build the prompt (`internal/review/prompt.go`, asking for JSON matching `report.Schema`) → call the LLM (native structured output on supported Anthropic models) → parse and render the review (`internal/report`; raw output with a warning if parsing fails) → post a sticky PR comment (identified by the `<!-- pr-review-action -->` marker, updated in place on re-runs) → write the `review` output. Keep the marker stable so existing comments keep being updated.
 - `.github/workflows/pr-review.yaml` — reusable workflow wrapper that maps `workflow_call` inputs/secrets onto the composite action (`ctrl-research/ego@main`).
 
 Forge abstraction: `github` (`Authorization: Bearer`, diff via `Accept: application/vnd.github.v3.diff`) vs `forgejo`/`gitea` (`Authorization: token`, diff at `/pulls/<n>.diff`).
 
 Provider abstraction: `anthropic` (Messages API, `x-api-key` + `anthropic-version` headers, response text at `.content[] | select(.type=="text")`) vs `openai`/`openai-compatible` (Chat Completions, `Authorization: Bearer`, response at `.choices[0].message.content`). Local endpoints (Ollama/vLLM) use `openai-compatible` with a required `base-url` and optional key.
+
+When changing the review format, update `report.Schema`, the `Review` struct, the field guidance in `basePrompt`, and the renderer together; the schema must stay within Anthropic's structured-output subset (`TestSchemaIsValidJSONAndStrict`).
 
 When adding inputs, update all layers: `action.yaml` (input + `EGO_*` env), `internal/review/config.go` (flag/env + validation), `.github/workflows/pr-review.yaml`, and the inputs table in `README.md`.
 
