@@ -32,6 +32,7 @@ The review logic is a dependency-free Go program (`cmd/ego`, `internal/...`); `a
 │       └── renovate.yaml     # Renovate workflow
 ├── .tool-versions            # Pinned language/tool versions (asdf/mise)
 ├── action.yaml               # Composite action: installs and runs the binary
+├── examples/                 # Copy-paste workflows referenced from the README (linted in CI)
 ├── cmd/ego/          # main: CLI flags/env → review.Run → step output
 ├── internal/
 │   ├── forge/                # GitHub / Forgejo API: PR, diff, sticky comment
@@ -57,7 +58,7 @@ CI (`.github/workflows/ci.yml`) runs gofmt, `go vet`, `go test -race`, a build, 
 gofmt -l .                # must print nothing
 go vet ./...
 go test -race ./...
-go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 .github/workflows/*.y*ml examples/*.yaml
 python3 -c "import yaml; yaml.safe_load(open('action.yaml'))"   # actionlint doesn't cover action.yaml
 ```
 
@@ -86,6 +87,7 @@ When adding inputs, update all layers: `action.yaml` (input + `EGO_*` env), `int
 - `self-review.yaml` runs on `pull_request_target` with secrets. It must only ever check out the base commit and run `uses: ./` from it; never check out, build or run the PR head there.
 - Keep secrets off the argv: the forge token and LLM key are env-only (no flags). All HTTP goes through `httpx.NewClient`, which never follows redirects.
 - Standard library only; adding a Go module dependency needs a clear justification.
+- Keep `examples/` in sync with inputs and outputs, and with the README's Setup and recipes section. They're real workflows, so CI's actionlint run catches broken syntax and expressions.
 - Pin third-party actions to exact versions; Renovate manages bumps.
 - Versioning: releases follow [SemVer](https://semver.org/) as bare `X.Y.Z` — no `v` prefix (`1.4.2`, not `v1.4.2`). Bump MAJOR for breaking changes (e.g. removing/renaming inputs or outputs, changing defaults), MINOR for backwards-compatible features, PATCH for fixes.
 - Conventional commits (`feat`, `fix`, `chore`, `docs`, `ci`, ...); see CONTRIBUTING.md.

@@ -1,0 +1,72 @@
+# Terraform: format, validate and plan first, then have ego review the HCL
+# changes with Terraform-specific guidance, and block merges ego marks
+# blocking.
+#
+# ego reviews the diff, not the plan output. Keep posting the plan with the
+# tool you already use (e.g. tfcmt, Atlantis, Terraform Cloud). Don't paste
+# plan output into extra-prompt: that input is treated as trusted maintainer
+# instructions, and plan output contains values a PR can control.
+name: Terraform
+
+on:
+  pull_request:
+    paths:
+      - "infra/**"
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: hashicorp/setup-terraform@v4.0.1
+      - run: terraform fmt -check -recursive
+      - run: terraform init -input=false
+      - run: terraform validate -no-color
+      # Your cloud credentials for the plan go here. They have the same
+      # exposure on pull_request as any secret; see the README's Security
+      # section.
+      - run: terraform plan -input=false -no-color -lock=false
+
+  review:
+    needs: plan
+    # Review even when the plan fails, so the review can point at the cause.
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Review with ego
+        id: ego
+        uses: ctrl-research/ego@main # pin a release (e.g. @X.Y.Z) to use the prebuilt binary
+        with:
+          api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          extra-prompt: |
+            This repository manages infrastructure with Terraform. Review the HCL changes for:
+            - Changes that force resources to be destroyed or replaced: renamed resources or
+              modules without a `moved` block, changed `name`/`identifier`/immutable arguments,
+              `count`/`for_each` key changes. Treat data stores (databases, buckets, volumes)
+              being replaced as blocking unless the PR explains it.
+            - Removed or weakened `prevent_destroy`, `deletion_protection` or backups.
+            - IAM: wildcard actions or resources, new admin or cross-account access.
+            - Network exposure: 0.0.0.0/0 or ::/0 ingress, public buckets or snapshots,
+              public IPs on resources that didn't have one.
+            - Secrets: hard-coded credentials, defaults on secret variables, outputs or
+              variables holding secrets without `sensitive = true`.
+            - Encryption turned off or not configured for storage, databases and queues.
+            - Provider and module version constraints that were loosened or removed.
+            - Backend or state configuration changes.
+            - Missing required tags and naming conventions.
+            Report each as a finding with the resource address in the title.
+
+      - name: Fail on a blocking review
+        if: steps.ego.outputs.verdict == 'blocking'
+        run: |
+          echo "::error::ego marked this change as blocking. See the review comment on the PR."
+          exit 1

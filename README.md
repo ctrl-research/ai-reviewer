@@ -187,6 +187,33 @@ jobs:
         run: echo "${{ steps.review.outputs.review }}"
 ```
 
+## Setup and recipes
+
+### What a repo needs
+
+`ego` is a GitHub Action, not a GitHub App: there's nothing to install on the org. It runs in each repo's own workflow and uses that job's `GITHUB_TOKEN`, so reviews are posted as `github-actions[bot]`.
+
+- **A workflow** that calls `ego` (see Usage) with `pull-requests: write` in its `permissions:`. Declaring it works even when the org's default token is read-only.
+- **An LLM key**, as a repo secret or an org secret shared with the repo.
+- **Actions enabled** for the repo. If the org allows only selected actions, add `ctrl-research/ego@*`, plus `actions/setup-go@*` if you use `ego` from a branch or commit instead of a release, since those build from source.
+
+### Recipes
+
+Complete workflows in [`examples/`](examples/), linted in CI:
+
+| Recipe | When to use it |
+|---|---|
+| [`run-after-checks.yaml`](examples/run-after-checks.yaml) | Run `ego` after your tests and linters in the same workflow (`needs:` with `if: ${{ !cancelled() }}`), so the review lands last, and fail the run on a 🛑 verdict |
+| [`terraform.yaml`](examples/terraform.yaml) | Terraform: `fmt`, `validate` and `plan` first, then `ego` with an `extra-prompt` checklist for destroys and replacements, IAM, network exposure, secrets, encryption, version constraints and state, and a merge block on 🛑 |
+| [`after-other-workflows.yaml`](examples/after-other-workflows.yaml) | Your checks live in a separate workflow file: trigger `ego` with `workflow_run` when that workflow completes |
+| [`app-identity.yaml`](examples/app-identity.yaml) | Post as your own GitHub App (e.g. `ego[bot]`) instead of `github-actions[bot]`, using `actions/create-github-app-token` |
+
+**What `ego` sees.** `ego` reviews the PR's title, description and diff. It doesn't read other checks' results, job logs or PR comments, such as a posted `terraform plan`. Ordering it after your checks makes its review the last word on the PR and lets you gate on `verdict`, but the model doesn't see those checks' output.
+
+**Don't paste CI output into `extra-prompt`.** That input is treated as trusted maintainer instructions, ranked above the built-in guidance. Plan output, test logs and similar text contain values the PR controls, so putting them there would let a PR steer the review. Use `extra-prompt` for fixed guidance, like the Terraform checklist.
+
+**Rolling it out across an org.** Add a workflow to each repo. Or, on GitHub Enterprise Cloud or Enterprise Server, require it from an organization ruleset ("require workflows to pass before merging"), which runs a workflow from a central repo on every targeted repo without per-repo files.
+
 ## Versioning
 
 Releases are tagged with bare SemVer (`X.Y.Z`, no `v` prefix). Pin to a release tag (e.g. `ctrl-research/ego@1.0.0`) instead of `@main` for reproducible reviews. Note that the reusable workflow always calls the composite action at `@main` (built from source on every run); use the composite action directly if you need the whole pipeline pinned or want the prebuilt binary.
