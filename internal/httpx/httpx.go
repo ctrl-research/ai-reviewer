@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strconv"
 	"time"
@@ -34,6 +35,10 @@ type Retry struct {
 	Attempts int           // total attempts, including the first; <1 means 1
 	Delay    time.Duration // wait between attempts unless Retry-After says otherwise
 	MaxDelay time.Duration // cap on a server-supplied Retry-After; 0 means 60s
+	// NoTimeoutRetry gives up when an attempt times out, for requests where
+	// a timeout most likely means the work itself takes too long (a slow
+	// generation) and a retry would just repeat it.
+	NoTimeoutRetry bool
 }
 
 // StatusError is returned when the final response has an unexpected status.
@@ -68,7 +73,7 @@ func Do(ctx context.Context, c *http.Client, r Retry, newReq func(context.Contex
 			return body, truncated, nil
 		}
 		lastErr = err
-		if wait < 0 || attempt >= attempts {
+		if wait < 0 || attempt >= attempts || (r.NoTimeoutRetry && isTimeout(err)) {
 			return nil, false, lastErr
 		}
 		if wait == 0 {
@@ -121,6 +126,11 @@ func once(c *http.Client, req *http.Request, maxBody int64, ok []int) (body []by
 		return nil, false, -1, serr
 	}
 	return nil, false, retryAfter(resp.Header.Get("Retry-After")), serr
+}
+
+func isTimeout(err error) bool {
+	var ne net.Error
+	return errors.As(err, &ne) && ne.Timeout()
 }
 
 func retryable(code int) bool {

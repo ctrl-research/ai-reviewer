@@ -48,6 +48,11 @@ jobs:
           base-url: ${{ secrets.MINIMAX_API_URL }}
           api-key: ${{ secrets.MINIMAX_API_TOKEN }}
           model: MiniMax-M3
+          # Reasoning and the review share this budget; 16k ran out on large
+          # diffs before any review was written. MiniMax-M3 has run at roughly
+          # 40-70 tokens/s, so 32k can take ~8-14 minutes, inside ego's
+          # 20-minute LLM request timeout.
+          max-tokens: "32000"
           # Return reasoning in reasoning_content instead of inline <think>
           # tags, which can't be split reliably from the review text.
           extra-body: '{"reasoning_split": true}'

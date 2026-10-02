@@ -56,6 +56,16 @@ type Result struct {
 // ErrEmpty is returned when the provider responds without any review text.
 var ErrEmpty = errors.New("LLM response contained no review text")
 
+// outOfTokens explains an empty response that stopped at the token limit:
+// with reasoning models, the reasoning usually used up the whole budget.
+func outOfTokens(outputTokens int) error {
+	used := ""
+	if outputTokens > 0 {
+		used = fmt.Sprintf(" (%d output tokens)", outputTokens)
+	}
+	return fmt.Errorf("%w: the model reached max-tokens%s before writing the review, most likely spending them on reasoning; raise max-tokens", ErrEmpty, used)
+}
+
 // Client calls one provider.
 type Client struct {
 	Provider string
@@ -71,9 +81,12 @@ func New(provider, baseURL, apiKey string) (*Client, error) {
 	c := &Client{
 		Provider: provider,
 		APIKey:   apiKey,
-		// Non-streaming generations of up to ~16k tokens can take minutes.
-		HTTP:  httpx.NewClient(10 * time.Minute),
-		Retry: httpx.Retry{Attempts: 3, Delay: 5 * time.Second},
+		// Non-streaming generations can take many minutes with reasoning
+		// models and large max-tokens. A timeout means the generation itself
+		// is too slow, so it isn't retried; connection errors, 429s and 5xx
+		// still are.
+		HTTP:  httpx.NewClient(20 * time.Minute),
+		Retry: httpx.Retry{Attempts: 3, Delay: 5 * time.Second, NoTimeoutRetry: true},
 	}
 	switch provider {
 	case Anthropic:
@@ -282,10 +295,13 @@ func parseAnthropic(body []byte) (*Result, error) {
 		}
 	}
 	text := strings.Join(parts, "\n")
+	u := r.Usage
 	if strings.TrimSpace(text) == "" {
+		if r.StopReason == "max_tokens" {
+			return nil, outOfTokens(u.OutputTokens)
+		}
 		return nil, ErrEmpty
 	}
-	u := r.Usage
 	return &Result{
 		Text:         text,
 		Truncated:    r.StopReason == "max_tokens",
@@ -311,6 +327,8 @@ type openAIResponse struct {
 		Message struct {
 			Content *string `json:"content"`
 			Refusal *string `json:"refusal"`
+			// Reasoning returned separately (e.g. MiniMax with reasoning_split).
+			ReasoningContent *string `json:"reasoning_content"`
 		} `json:"message"`
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
@@ -329,14 +347,18 @@ func parseOpenAI(body []byte) (*Result, error) {
 		return nil, fmt.Errorf("model declined to review: %s", *ref)
 	}
 	truncated := choice.FinishReason == "length"
-	if choice.Message.Content == nil {
-		return nil, ErrEmpty
+	content := ""
+	if choice.Message.Content != nil {
+		content = *choice.Message.Content
 	}
-	text, finished := stripThinking(*choice.Message.Content)
-	if !finished && truncated {
-		return nil, errors.New("model stopped at max-tokens before finishing its reasoning; raise max-tokens")
-	}
-	if strings.TrimSpace(text) == "" {
+	text, finished := stripThinking(content)
+	if !finished || strings.TrimSpace(text) == "" {
+		if truncated {
+			return nil, outOfTokens(r.Usage.CompletionTokens)
+		}
+		if rc := choice.Message.ReasoningContent; rc != nil && strings.TrimSpace(*rc) != "" {
+			return nil, fmt.Errorf("%w: the model returned reasoning but no answer", ErrEmpty)
+		}
 		return nil, ErrEmpty
 	}
 	return &Result{
