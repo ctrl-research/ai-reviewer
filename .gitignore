@@ -63,3 +63,7 @@ venv/
 *.tmp
 *.temp
 .cache/
+
+# Docs site build output (scripts/build-docs.sh)
+site/
+.nebula/

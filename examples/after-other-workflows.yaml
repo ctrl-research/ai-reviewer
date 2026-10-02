@@ -1,0 +1,39 @@
+# Run ego after a separate workflow finishes, using workflow_run, when your
+# checks live in another workflow file.
+#
+# - workflow_run fires once per listed workflow that completes. List one
+#   workflow (usually the slowest), or the PR is reviewed once per workflow.
+# - The run uses this file as it is on the default branch and has access to
+#   secrets, like pull_request_target. That's safe here because ego never runs
+#   PR code: it reads the PR through the API. Don't add a checkout of the PR's
+#   head here.
+# - GitHub doesn't attach PRs from forks to workflow_run events, so those are
+#   skipped.
+name: ego review
+
+on:
+  workflow_run:
+    workflows: [CI] # the `name:` of the workflow to wait for
+    types: [completed]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: ego-${{ github.event.workflow_run.pull_requests[0].number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    if: >-
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion != 'cancelled' &&
+      github.event.workflow_run.pull_requests[0].number
+    runs-on: ubuntu-latest
+    steps:
+      - name: Review with ego
+        uses: ctrl-research/ego@main # pin a release (e.g. @X.Y.Z) to use the prebuilt binary
+        with:
+          pr-number: ${{ github.event.workflow_run.pull_requests[0].number }}
+          api-key: ${{ secrets.ANTHROPIC_API_KEY }}

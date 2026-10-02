@@ -56,4 +56,5 @@ jobs:
         run: CGO_ENABLED=0 go build -trimpath -o /dev/null ./cmd/ego
 
       - name: Lint workflows and action
-        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+        # Explicit paths so the README's example workflows are linted too.
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 .github/workflows/*.y*ml examples/*.yaml

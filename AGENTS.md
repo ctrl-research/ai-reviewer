@@ -25,13 +25,16 @@ The review logic is a dependency-free Go program (`cmd/ego`, `internal/...`); `a
 │   ├── CODEOWNERS            # @ctrl-research/reviewers
 │   ├── renovate-config.js    # Renovate platform config
 │   └── workflows/
-│       ├── ci.yml            # YAML parse + committed-secrets check
+│       ├── ci.yml            # Go checks, actionlint, YAML parse, committed-secrets check
+│       ├── docs.yaml         # Builds the docs site; deploys to GitHub Pages from main
 │       ├── pr-review.yaml    # Reusable workflow wrapper for the action
 │       ├── release.yaml      # Label-driven SemVer release workflow
 │       ├── self-review.yaml  # Reviews this repo's PRs with merged ego via pull_request_target; never runs PR code
 │       └── renovate.yaml     # Renovate workflow
 ├── .tool-versions            # Pinned language/tool versions (asdf/mise)
 ├── action.yaml               # Composite action: installs and runs the binary
+├── docs/                     # Docs site source (nebula-md vault), published to GitHub Pages
+├── examples/                 # Copy-paste workflows, included into docs/recipes at build time (linted in CI)
 ├── cmd/ego/          # main: CLI flags/env → review.Run → step output
 ├── internal/
 │   ├── forge/                # GitHub / Forgejo API: PR, diff, sticky comment
@@ -44,7 +47,8 @@ The review logic is a dependency-free Go program (`cmd/ego`, `internal/...`); `a
 ├── AGENTS.md                 # Operational expectations for humans and AI agents
 ├── CONTRIBUTING.md
 ├── LICENSE
-├── README.md                 # Action usage, inputs/outputs, security notes
+├── README.md                 # Overview, quick start, links into the docs site
+├── scripts/build-docs.sh     # Builds the docs site (expands example includes, runs nebula-md)
 ├── SECURITY.md
 └── renovate.json             # Renovate settings
 ```
@@ -57,7 +61,7 @@ CI (`.github/workflows/ci.yml`) runs gofmt, `go vet`, `go test -race`, a build, 
 gofmt -l .                # must print nothing
 go vet ./...
 go test -race ./...
-go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 .github/workflows/*.y*ml examples/*.yaml
 python3 -c "import yaml; yaml.safe_load(open('action.yaml'))"   # actionlint doesn't cover action.yaml
 ```
 
@@ -75,7 +79,7 @@ Provider abstraction: `anthropic` (Messages API, `x-api-key` + `anthropic-versio
 
 When changing the review format, update `report.Schema`, the `Review` struct, the field guidance in `basePrompt`, and the renderer together; the schema must stay within Anthropic's structured-output subset (`TestSchemaIsValidJSONAndStrict`).
 
-When adding inputs, update all layers: `action.yaml` (input + `EGO_*` env), `internal/review/config.go` (flag/env + validation), `.github/workflows/pr-review.yaml`, and the inputs table in `README.md`.
+When adding inputs, update all layers: `action.yaml` (input + `EGO_*` env), `internal/review/config.go` (flag/env + validation), `.github/workflows/pr-review.yaml`, and the inputs table in `docs/configuration.md` (plus `docs/cli.md` for the flag/env names).
 
 ## Conventions
 
@@ -86,6 +90,8 @@ When adding inputs, update all layers: `action.yaml` (input + `EGO_*` env), `int
 - `self-review.yaml` runs on `pull_request_target` with secrets. It must only ever check out the base commit and run `uses: ./` from it; never check out, build or run the PR head there.
 - Keep secrets off the argv: the forge token and LLM key are env-only (no flags). All HTTP goes through `httpx.NewClient`, which never follows redirects.
 - Standard library only; adding a Go module dependency needs a clear justification.
+- Keep `examples/` in sync with inputs and outputs, and with the pages in `docs/recipes/`. They're real workflows, so CI's actionlint run catches broken syntax and expressions.
+- Docs pages (`docs/`) are a nebula-md vault: front matter with `title`, no H1 in the body, and `[[path/from/docs/root|Label]]` wikilinks between pages. Inside table cells, wikilinks render as plain text, so use a relative markdown link such as `[Label](page)` there instead. Recipe pages embed examples with `<!-- include: examples/<file>.yaml -->` lines, expanded by `scripts/build-docs.sh`. Raw HTML is dropped.
 - Pin third-party actions to exact versions; Renovate manages bumps.
 - Versioning: releases follow [SemVer](https://semver.org/) as bare `X.Y.Z` — no `v` prefix (`1.4.2`, not `v1.4.2`). Bump MAJOR for breaking changes (e.g. removing/renaming inputs or outputs, changing defaults), MINOR for backwards-compatible features, PATCH for fixes.
 - Conventional commits (`feat`, `fix`, `chore`, `docs`, `ci`, ...); see CONTRIBUTING.md.

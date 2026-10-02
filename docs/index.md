@@ -1,4 +1,8 @@
-# ego
+---
+title: ego
+tags:
+  - landing
+---
 
 > *"Do you know what I'm craving? A little perspective."*
 > — Anton Ego, *Ratatouille*
@@ -6,8 +10,6 @@
 `ego` is that perspective for your pull requests: an outside reviewer that reads the diff before it merges. It's a GitHub Action (it also runs on Forgejo and Gitea) that sends the PR to the LLM of your choice and posts one structured review comment, updated in place on every push.
 
 The name also borrows from Freud. In his model of the mind, the *id* acts on impulse, the *superego* holds the rules, and the *ego* weighs the two against reality before anything happens. Agentic development has the same shape: coding agents generate changes on impulse, your conventions sit above them, and `ego` is the reality check before anything reaches `main`.
-
-**📖 Documentation: https://ctrl-research.github.io/ego/**
 
 ## What you get
 
@@ -40,25 +42,13 @@ jobs:
 
 Open a pull request, and the review appears as a comment.
 
-## Learn more
+## Where next
 
-| Page | Covers |
-|---|---|
-| [Getting started](https://ctrl-research.github.io/ego/getting-started) | Setup, the composite action, other providers, Forgejo |
-| [The review](https://ctrl-research.github.io/ego/review) | The sections, tuning (`concise`, `extra-prompt`, `review-prompt`), gating on the verdict, cost |
-| [Configuration](https://ctrl-research.github.io/ego/configuration) | Every input and output, and `extra-body` |
-| [Recipes](https://ctrl-research.github.io/ego/recipes/index) | Running after other checks, Terraform, `workflow_run`, your own bot identity ([`examples/`](examples/)) |
-| [Providers and forges](https://ctrl-research.github.io/ego/providers) | Anthropic, OpenAI, MiniMax, Ollama; GitHub and Forgejo |
-| [Security](https://ctrl-research.github.io/ego/security) | `pull_request` vs `pull_request_target`, secrets, untrusted input |
-| [Running locally](https://ctrl-research.github.io/ego/cli) | The binary as a CLI |
-| [Releases and development](https://ctrl-research.github.io/ego/development) | Versioning, release labels, the codebase, building the docs |
-
-The site is built from [`docs/`](docs/) with [nebula-md](https://github.com/ctrl-research/nebula-md).
-
-## Contributing
-
-See [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`AGENTS.md`](AGENTS.md). Security issues: [`SECURITY.md`](SECURITY.md).
-
-## License
-
-[MIT](LICENSE)
+- [[getting-started|Getting started]]: setup, other providers, and Forgejo.
+- [[review|The review]]: what each section means, and how to tune it.
+- [[configuration|Configuration]]: every input and output.
+- [[recipes/index|Recipes]]: running after other checks, Terraform, `workflow_run`, a custom bot identity.
+- [[providers|Providers and forges]]: provider-specific notes.
+- [[security|Security]]: triggers, secrets and untrusted input.
+- [[cli|Running locally]]: the same binary as a CLI.
+- [[development|Releases and development]]: versioning, how releases work, and the codebase.

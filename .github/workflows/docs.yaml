@@ -1,0 +1,87 @@
+name: Docs
+
+# Builds the docs site (docs/ + examples/) with nebula-md, and publishes it to
+# GitHub Pages on pushes to main. PRs only build, to catch broken pages and
+# includes before merge.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "examples/**"
+      - "scripts/build-docs.sh"
+      - ".github/workflows/docs.yaml"
+  pull_request:
+    paths:
+      - "docs/**"
+      - "examples/**"
+      - "scripts/build-docs.sh"
+      - ".github/workflows/docs.yaml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # ctrl-research/nebula-md, pinned to a commit: its code runs in a job whose
+  # output is published. Bump deliberately.
+  NEBULA_REF: 6a4af29c88830f6d4317e871e6632127108ff93a
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Checkout nebula-md
+        uses: actions/checkout@v7.0.1
+        with:
+          repository: ctrl-research/nebula-md
+          ref: ${{ env.NEBULA_REF }}
+          path: .nebula
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v7.0.0
+        with:
+          go-version-file: .nebula/src/go.mod
+          cache: false
+
+      - name: Build nebula-md
+        working-directory: .nebula/src
+        env:
+          CGO_ENABLED: "0"
+        run: go build -buildvcs=false -trimpath -o "$RUNNER_TEMP/nebula" .
+
+      - name: Build site
+        env:
+          NEBULA_BIN: ${{ runner.temp }}/nebula
+        run: scripts/build-docs.sh site
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v5.0.0
+        with:
+          path: site
+
+  deploy:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5.0.1

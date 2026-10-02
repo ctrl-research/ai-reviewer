@@ -1,0 +1,38 @@
+# Post reviews as your own GitHub App (e.g. "ego[bot]" with its own avatar)
+# instead of github-actions[bot].
+#
+# Create a GitHub App with Pull requests: Read and write and Contents: Read,
+# install it on the repositories to review, and store its client ID as the
+# EGO_APP_CLIENT_ID variable and its private key as the EGO_APP_PRIVATE_KEY
+# secret. No server is involved: the workflow mints a short-lived token per
+# run.
+#
+# Existing reviews posted by github-actions[bot] can't be edited by the app,
+# so the first run posts a new comment; later runs update that one.
+name: ego review
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  review:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mint a token for the app
+        id: app-token
+        uses: actions/create-github-app-token@v3.2.0
+        with:
+          client-id: ${{ vars.EGO_APP_CLIENT_ID }}
+          private-key: ${{ secrets.EGO_APP_PRIVATE_KEY }}
+          permission-pull-requests: write
+          permission-contents: read
+
+      - name: Review with ego
+        uses: ctrl-research/ego@main # pin a release (e.g. @X.Y.Z) to use the prebuilt binary
+        with:
+          github-token: ${{ steps.app-token.outputs.token }}
+          api-key: ${{ secrets.ANTHROPIC_API_KEY }}

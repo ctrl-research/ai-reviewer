@@ -1,0 +1,47 @@
+# Run ego after the other jobs in the same workflow, so its review is the last
+# thing to land on the PR, and fail the run if ego marks the change blocking.
+#
+# ego reviews the PR's title, description and diff. It doesn't read the other
+# jobs' results; ordering them with `needs:` just makes the review arrive
+# last and lets you gate on its verdict alongside them.
+name: CI
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - run: make test
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - run: make lint
+
+  review:
+    needs: [test, lint]
+    # Review even when tests or lint fail; skip only if the run was cancelled.
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Review with ego
+        id: ego
+        uses: ctrl-research/ego@main # pin a release (e.g. @X.Y.Z) to use the prebuilt binary
+        with:
+          api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+
+      - name: Fail on a blocking review
+        if: steps.ego.outputs.verdict == 'blocking'
+        run: |
+          echo "::error::ego marked this change as blocking. See the review comment on the PR."
+          exit 1
