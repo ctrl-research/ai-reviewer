@@ -99,5 +99,6 @@ When adding inputs, update all layers: `action.yaml` (input + `EGO_*` env), `int
   - `minor` — backwards-compatible features
   - `patch` — fixes
   - No label — defaults to a `patch` bump
+- Only maintainers set these release labels. Renovate labels its PRs `update:major` / `update:minor` / `update:patch` (the *dependency's* update type), so dependency bumps release as an ego patch unless someone adds a release label.
 - **Manual releases**: a specific version may be cut manually by supplying an explicit `X.Y.Z` version via workflow dispatch. This bypasses the label-based bump.
 - Release automation lives in `.github/workflows/release.yaml`: it computes the next version, runs tests, cross-compiles the binaries (linux/darwin/windows × amd64/arm64) with `checksums.txt`, tags, and creates the GitHub release with those assets attached. Asset names are part of the contract with `action.yaml` — change both together.
