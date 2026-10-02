@@ -167,7 +167,7 @@ func TestOpenAIStripsInlineThinking(t *testing.T) {
 		{"think block", `<think>\nlet me look\n</think>\n\n## Summary\nok`, "stop", "## Summary\nok", ""},
 		{"no think block", "## Summary\nmentions <think> later", "stop", "## Summary\nmentions <think> later", ""},
 		{"only thinking", "<think>hmm</think>", "stop", "", "no review text"},
-		{"cut off mid-thought", "<think>still going", "length", "", "before finishing its reasoning"},
+		{"cut off mid-thought", "<think>still going", "length", "", "reached max-tokens before writing the review"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			resp, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{
@@ -265,5 +265,32 @@ func TestMergeNullRemovesNestedKey(t *testing.T) {
 	}
 	if string(fields["a"]) != `{"x":1,"z":3}` || string(fields["b"]) != `{"q":1}` {
 		t.Errorf("fields = %s %s", fields["a"], fields["b"])
+	}
+}
+
+func TestEmptyResponseExplainsTokenLimit(t *testing.T) {
+	for name, tc := range map[string]struct {
+		provider, body, want string
+	}{
+		"openai reasoning split, out of tokens": {OpenAICompatible,
+			`{"choices":[{"message":{"content":"","reasoning_content":"long thoughts"},"finish_reason":"length"}],"usage":{"completion_tokens":16000}}`,
+			"reached max-tokens (16000 output tokens) before writing the review"},
+		"openai null content, out of tokens": {OpenAICompatible,
+			`{"choices":[{"message":{"content":null},"finish_reason":"length"}]}`,
+			"reached max-tokens before writing the review"},
+		"openai reasoning only, finished": {OpenAICompatible,
+			`{"choices":[{"message":{"content":"","reasoning_content":"thoughts"},"finish_reason":"stop"}]}`,
+			"returned reasoning but no answer"},
+		"anthropic thinking only, out of tokens": {Anthropic,
+			`{"content":[{"type":"thinking","thinking":""}],"stop_reason":"max_tokens","usage":{"output_tokens":16000}}`,
+			"reached max-tokens (16000 output tokens) before writing the review"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, url := serve(t, 200, tc.body)
+			_, err := newTestClient(t, tc.provider, url, "k").Review(context.Background(), req)
+			if !errors.Is(err, ErrEmpty) || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("err = %v, want ErrEmpty containing %q", err, tc.want)
+			}
+		})
 	}
 }
